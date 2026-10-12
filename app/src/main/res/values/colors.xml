@@ -1,0 +1,9 @@
+<resources>
+    <color name="bg">#0E0C0A</color>
+    <color name="ic_bg">#0E0C0A</color>
+    <color name="sheet">#1A160F</color>
+    <color name="ln2">#3B3327</color>
+    <color name="ink">#F1E9D8</color>
+    <color name="gold">#C9A24B</color>
+    <color name="gold_bg">#1FC9A24B</color>
+</resources>

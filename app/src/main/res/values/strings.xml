@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Alouncher</string>
+    <string name="abrir">Abrir</string>
+    <string name="info_app">Información de la app</string>
+    <string name="no_se_pudo_abrir">No se pudo abrir la app</string>
+</resources>
