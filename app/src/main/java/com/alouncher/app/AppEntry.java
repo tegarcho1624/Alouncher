@@ -1,6 +1,7 @@
 package com.alouncher.app;
 
 import android.content.ComponentName;
+import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 
 /** Una app lanzable con sus datos originales y su personalización aplicada. */
@@ -44,6 +45,16 @@ final class AppEntry {
     /** Ícono que se muestra: si la imagen elegida ya no existe, cae al original. */
     Drawable icon() {
         return customIcon != null ? customIcon : originalIcon;
+    }
+
+    /**
+     * Copia propia del ícono. Un mismo Drawable no debe mostrarse en dos vistas a la vez
+     * (cajón + Home + dock tienen tamaños distintos), así que cada vista pide el suyo.
+     */
+    Drawable newIcon(Resources res) {
+        Drawable d = icon();
+        Drawable.ConstantState cs = d.getConstantState();
+        return cs != null ? cs.newDrawable(res).mutate() : d;
     }
 
     boolean hasCustomization() {

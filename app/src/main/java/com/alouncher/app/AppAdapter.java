@@ -1,6 +1,5 @@
 package com.alouncher.app;
 
-import android.view.HapticFeedbackConstants;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,6 +17,7 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
     interface Listener {
         void onOpen(AppEntry app);
         void onMenu(View anchor, AppEntry app);
+        void onDragStart(View anchor, AppEntry app);
         void onHiddenApps();
     }
 
@@ -27,6 +27,7 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
     private final List<AppEntry> items = new ArrayList<>();
     private boolean showHiddenCell;
     private final Listener listener;
+    private LongPressDrag drag;
 
     AppAdapter(Listener listener) {
         this.listener = listener;
@@ -48,6 +49,21 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
     @Override
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_app, parent, false);
+        if (viewType == TYPE_APP) {
+            if (drag == null) {
+                drag = new LongPressDrag(parent.getContext(), new LongPressDrag.Listener() {
+                    @Override public void onLongPress(View view) {
+                        Object t = view.getTag();
+                        if (t instanceof AppEntry) listener.onMenu(view, (AppEntry) t);
+                    }
+                    @Override public void onDragStart(View view) {
+                        Object t = view.getTag();
+                        if (t instanceof AppEntry) listener.onDragStart(view, (AppEntry) t);
+                    }
+                });
+            }
+            drag.attach(v); // pulsación larga = menú; seguir y mover = arrastrar
+        }
         return new VH(v);
     }
 
@@ -55,22 +71,17 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int position) {
         if (position >= items.size()) {
             // Celda especial al final del grid
+            h.itemView.setTag(null);
             h.icon.setImageResource(R.drawable.ic_hidden_cell);
             h.label.setText(R.string.apps_ocultas);
             h.itemView.setOnClickListener(v -> listener.onHiddenApps());
-            h.itemView.setOnLongClickListener(null);
-            h.itemView.setLongClickable(false);
             return;
         }
         AppEntry app = items.get(position);
-        h.icon.setImageDrawable(app.icon());
+        h.itemView.setTag(app);
+        h.icon.setImageDrawable(app.newIcon(h.itemView.getResources()));
         h.label.setText(app.label());
         h.itemView.setOnClickListener(v -> listener.onOpen(app));
-        h.itemView.setOnLongClickListener(v -> {
-            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            listener.onMenu(v, app);
-            return true;
-        });
     }
 
     @Override

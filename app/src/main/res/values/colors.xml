@@ -13,4 +13,7 @@
     <color name="gold_bg">#1FC9A24B</color>
     <color name="paper">#EFE6D2</color>
     <color name="pi">#2A2218</color>
+    <color name="scrim">#B8080604</color>
+    <color name="drop_hl">#33C9A24B</color>
+    <color name="drop_hl_line">#99C9A24B</color>
 </resources>

@@ -20,4 +20,12 @@
     <string name="imagen_no_leida">No se pudo leer esa imagen</string>
     <string name="imagen_sin_permiso">No se pudo conservar el acceso a esa imagen. Prueba con otra ubicación.</string>
     <string name="selector_no_disponible">No hay selector de imágenes disponible</string>
+
+    <string name="todas_las_apps">Todas las apps</string>
+    <string name="abrir_cajon">Abrir todas las apps</string>
+    <string name="home_vacia">Mantén presionada una app del cajón y arrástrala aquí</string>
+    <string name="quitar_home">Quitar de la Home</string>
+    <string name="quitar_dock">Quitar del dock</string>
+    <string name="home_llena">La Home está llena</string>
+    <string name="dock_lleno">El dock está lleno</string>
 </resources>
