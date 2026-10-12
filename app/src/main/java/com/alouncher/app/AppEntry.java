@@ -3,17 +3,44 @@ package com.alouncher.app;
 import android.content.ComponentName;
 import android.graphics.drawable.Drawable;
 
-/** Una app lanzable: nombre, ícono y componente a abrir. */
+/** Una app lanzable con sus datos originales y su personalización aplicada. */
 final class AppEntry {
-    final String label;
     final String packageName;
     final ComponentName component;
-    final Drawable icon;
 
-    AppEntry(String label, String packageName, ComponentName component, Drawable icon) {
-        this.label = label;
+    final String originalLabel;
+    final Drawable originalIcon;
+
+    final String customLabel;       // null si no hay
+    final String customIconPath;    // URI guardada; null si no hay
+    final Drawable customIcon;      // decodificada; null si no hay o si la imagen ya no existe
+    final boolean hidden;
+
+    AppEntry(String packageName, ComponentName component,
+             String originalLabel, Drawable originalIcon,
+             String customLabel, String customIconPath, Drawable customIcon,
+             boolean hidden) {
         this.packageName = packageName;
         this.component = component;
-        this.icon = icon;
+        this.originalLabel = originalLabel;
+        this.originalIcon = originalIcon;
+        this.customLabel = customLabel;
+        this.customIconPath = customIconPath;
+        this.customIcon = customIcon;
+        this.hidden = hidden;
+    }
+
+    /** Nombre que se muestra: el personalizado si existe. */
+    String label() {
+        return customLabel != null ? customLabel : originalLabel;
+    }
+
+    /** Ícono que se muestra: si la imagen elegida ya no existe, cae al original. */
+    Drawable icon() {
+        return customIcon != null ? customIcon : originalIcon;
+    }
+
+    boolean hasCustomization() {
+        return customLabel != null || customIconPath != null || hidden;
     }
 }

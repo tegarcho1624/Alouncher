@@ -1,14 +1,15 @@
-# Alouncher (Fase 1)
+# Alouncher (Fase 2)
 
-Launcher personal: grid de 4 columnas con todas las apps, toque = abrir,
-pulsación larga = menú (Abrir / Información de la app).
+Fase 1: grid de 4 columnas, toque = abrir, pulsación larga = menú.
+Fase 2: personalización por app (ícono, nombre, ocultar, restaurar).
 
-- **Sin permisos** (ni QUERY_ALL_PACKAGES, ni internet). Usa `<queries>` en el manifest.
-- Se registra como HOME, pero NO se fuerza como predeterminado: eso se elige en
-  Ajustes › Apps › Apps predeterminadas › App de inicio.
-- minSdk 26 (Android 8.0), targetSdk 34.
+## Permisos
+Ninguno. El selector de imágenes es ACTION_OPEN_DOCUMENT (no pide permisos);
+solo se conserva el acceso de lectura a la imagen que tú eliges.
+
+## Datos
+SharedPreferences "customizations": clave = packageName, valor = JSON
+{"n": nombre, "i": uri de la imagen, "h": true si está oculta}.
 
 ## Compilar
-Sube la carpeta a GitHub (con `.github` en la raíz) → Actions › Build APK → descarga `Alouncher-APK`.
-La firma es fija (`alouncher-debug.keystore`): cada versión se instala encima de la anterior.
-No cambies `applicationId` ni el keystore.
+GitHub › Actions › Build APK. No cambies `applicationId` ni el keystore.

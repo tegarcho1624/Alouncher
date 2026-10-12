@@ -3,4 +3,21 @@
     <string name="abrir">Abrir</string>
     <string name="info_app">Información de la app</string>
     <string name="no_se_pudo_abrir">No se pudo abrir la app</string>
+
+    <string name="cambiar_icono">Cambiar ícono</string>
+    <string name="cambiar_nombre">Cambiar nombre</string>
+    <string name="ocultar_app">Ocultar app</string>
+    <string name="restaurar">Restaurar</string>
+    <string name="restaurar_nombre">Restaurar nombre original</string>
+    <string name="nombre_original">Nombre original: %1$s</string>
+    <string name="guardar">Guardar</string>
+    <string name="cancelar">Cancelar</string>
+    <string name="cerrar">Cerrar</string>
+    <string name="apps_ocultas">Apps ocultas</string>
+    <string name="apps_ocultas_ayuda">Al restaurar, la app vuelve al grid con su nombre e ícono personalizados.</string>
+    <string name="app_oculta">App oculta. La encuentras en «Apps ocultas», al final del grid.</string>
+    <string name="app_restaurada">Personalización restaurada</string>
+    <string name="imagen_no_leida">No se pudo leer esa imagen</string>
+    <string name="imagen_sin_permiso">No se pudo conservar el acceso a esa imagen. Prueba con otra ubicación.</string>
+    <string name="selector_no_disponible">No hay selector de imágenes disponible</string>
 </resources>
