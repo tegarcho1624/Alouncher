@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
 
     private static final int COLUMNS = 4;
     private static final int REQ_PICK_ICON = 1001;
-    private static final String STATE_PENDING_PKG = "pendingIconPkg";
+    private static final String STATE_PENDING_KEY = "pendingIconKey";
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
     private BroadcastReceiver pkgReceiver;
 
     private List<AppEntry> hiddenApps = new ArrayList<>();
-    private String pendingIconPkg; // app a la que se le está eligiendo ícono
+    private String pendingIconKey; // entrada (paquete/actividad) a la que se le elige ícono
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,7 +67,7 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         store = new CustomizationStore(this);
         if (savedInstanceState != null) {
-            pendingIconPkg = savedInstanceState.getString(STATE_PENDING_PKG);
+            pendingIconKey = savedInstanceState.getString(STATE_PENDING_KEY);
         }
 
         grid = findViewById(R.id.grid);
@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        outState.putString(STATE_PENDING_PKG, pendingIconPkg);
+        outState.putString(STATE_PENDING_KEY, pendingIconKey);
     }
 
     /** Se llama al pulsar HOME estando ya abierto (launchMode singleTask). */
@@ -144,13 +144,24 @@ public class MainActivity extends Activity {
             Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
             List<ResolveInfo> found = pm.queryIntentActivities(q, 0);
 
+            // Migración: personalizaciones guardadas antes solo por paquete.
+            java.util.Map<String, List<String>> byPkg = new java.util.HashMap<>();
+            for (ResolveInfo ri : found) {
+                String pkg = ri.activityInfo.packageName;
+                byPkg.computeIfAbsent(pkg, k -> new ArrayList<>())
+                        .add(pkg + "/" + ri.activityInfo.name);
+            }
+            for (java.util.Map.Entry<String, List<String>> en : byPkg.entrySet()) {
+                store.migrate(en.getKey(), en.getValue());
+            }
+
             List<AppEntry> visible = new ArrayList<>();
             List<AppEntry> hidden = new ArrayList<>();
             for (ResolveInfo ri : found) {
                 String pkg = ri.activityInfo.packageName;
                 if (pkg.equals(getPackageName())) continue; // no mostrarse a sí mismo
 
-                Customization c = store.get(pkg);
+                Customization c = store.get(pkg + "/" + ri.activityInfo.name);
                 // Si la imagen ya no existe, load() devuelve null y se usa el ícono original.
                 Drawable custom = c.icon != null ? IconLoader.load(this, c.icon, iconPx) : null;
 
@@ -204,7 +215,7 @@ public class MainActivity extends Activity {
     // de lectura SOLO a la imagen elegida (takePersistableUriPermission).
 
     private void pickIcon(AppEntry app) {
-        pendingIconPkg = app.packageName;
+        pendingIconKey = app.key();
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("image/*");
@@ -213,7 +224,7 @@ public class MainActivity extends Activity {
         try {
             startActivityForResult(i, REQ_PICK_ICON);
         } catch (ActivityNotFoundException e) {
-            pendingIconPkg = null;
+            pendingIconKey = null;
             toast(R.string.selector_no_disponible);
         }
     }
@@ -223,10 +234,10 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_PICK_ICON) return;
 
-        final String pkg = pendingIconPkg;
-        pendingIconPkg = null;
+        final String key = pendingIconKey;
+        pendingIconKey = null;
         // Cancelado: no se cambia nada.
-        if (resultCode != RESULT_OK || data == null || data.getData() == null || pkg == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null || key == null) return;
 
         final Uri uri = data.getData();
         try {
@@ -247,8 +258,8 @@ public class MainActivity extends Activity {
                     toast(R.string.imagen_no_leida);
                     return;
                 }
-                String old = store.get(pkg).icon;
-                store.setIcon(pkg, uriStr);
+                String old = store.get(key).icon;
+                store.setIcon(key, uriStr);
                 if (old != null && !old.equals(uriStr)) releaseIfUnused(old);
                 reload();
             });
@@ -268,8 +279,8 @@ public class MainActivity extends Activity {
     // ---- Restaurar / olvidar --------------------------------------------------------
 
     private void restoreAll(AppEntry app) {
-        String old = store.get(app.packageName).icon;
-        store.clear(app.packageName);
+        String old = store.get(app.key()).icon;
+        store.clear(app.key());
         releaseIfUnused(old);
         toast(R.string.app_restaurada);
         reload();
@@ -277,15 +288,13 @@ public class MainActivity extends Activity {
 
     private void forget(String pkg) {
         if (pkg == null) return;
-        String old = store.get(pkg).icon;
-        store.clear(pkg);
-        releaseIfUnused(old);
+        for (String uri : store.clearPackage(pkg)) releaseIfUnused(uri);
     }
 
     // ---- Ocultar -----------------------------------------------------------------------
 
     private void hideApp(AppEntry app) {
-        store.setHidden(app.packageName, true);
+        store.setHidden(app.key(), true);
         toast(R.string.app_oculta);
         reload();
     }
@@ -335,7 +344,7 @@ public class MainActivity extends Activity {
 
         TextView restore = BottomSheet.button(this, getString(R.string.restaurar), false);
         restore.setOnClickListener(v -> {
-            store.setHidden(app.packageName, false); // solo la vuelve a mostrar
+            store.setHidden(app.key(), false); // solo la vuelve a mostrar
             s.body().removeView(item);
             if (s.body().getChildCount() == 0) s.dismiss();
             reload();
@@ -378,7 +387,7 @@ public class MainActivity extends Activity {
         Runnable save = () -> {
             String t = et.getText().toString().trim();
             // Vacío o igual al original = volver al nombre original.
-            store.setName(app.packageName, (t.isEmpty() || t.equals(app.originalLabel)) ? null : t);
+            store.setName(app.key(), (t.isEmpty() || t.equals(app.originalLabel)) ? null : t);
             s.dismiss();
             reload();
         };
@@ -398,7 +407,7 @@ public class MainActivity extends Activity {
         if (app.customLabel != null) {
             TextView restore = BottomSheet.button(this, getString(R.string.restaurar_nombre), false);
             restore.setOnClickListener(v -> {
-                store.setName(app.packageName, null);
+                store.setName(app.key(), null);
                 s.dismiss();
                 reload();
             });

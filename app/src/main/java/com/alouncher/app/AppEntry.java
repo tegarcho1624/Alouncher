@@ -7,6 +7,7 @@ import android.graphics.drawable.Drawable;
 final class AppEntry {
     final String packageName;
     final ComponentName component;
+    final String key;               // paquete + actividad: identifica cada entrada del launcher
 
     final String originalLabel;
     final Drawable originalIcon;
@@ -22,12 +23,17 @@ final class AppEntry {
              boolean hidden) {
         this.packageName = packageName;
         this.component = component;
+        this.key = packageName + "/" + component.getClassName();
         this.originalLabel = originalLabel;
         this.originalIcon = originalIcon;
         this.customLabel = customLabel;
         this.customIconPath = customIconPath;
         this.customIcon = customIcon;
         this.hidden = hidden;
+    }
+
+    String key() {
+        return key;
     }
 
     /** Nombre que se muestra: el personalizado si existe. */
