@@ -26,6 +26,24 @@
     <string name="home_vacia">Mantén presionada una app del cajón y arrástrala aquí</string>
     <string name="quitar_home">Quitar de la Home</string>
     <string name="quitar_dock">Quitar del dock</string>
-    <string name="home_llena">La Home está llena</string>
+    <string name="home_llena">Esta página está llena</string>
     <string name="dock_lleno">El dock está lleno</string>
+
+    <string name="menu_home_titulo">Pantalla de inicio</string>
+    <string name="menu_home_ayuda">Mantén presionada una página para moverla; deslízala hacia arriba para eliminarla.</string>
+    <string name="fondos_temas">Fondos y temas</string>
+    <string name="widgets">Widgets</string>
+    <string name="config_home">Configuración de pantalla principal</string>
+    <string name="proximamente">Próximamente</string>
+    <string name="volver">Volver</string>
+    <string name="pagina_izquierda">Añadir página a la izquierda</string>
+    <string name="pagina_derecha">Añadir página a la derecha</string>
+    <string name="eliminar_pagina">Eliminar página</string>
+    <string name="max_paginas">Máximo de páginas alcanzado</string>
+    <string name="pagina_principal_no">La página principal no se puede eliminar</string>
+    <string name="pagina_unica_no">No se puede eliminar la única página</string>
+    <string name="pagina_eliminada">Página eliminada</string>
+
+    <string name="editar_ayuda">Mantén presionada una página y arrástrala: suéltala sobre otra para reordenar, o deslízala hacia arriba para eliminarla.</string>
+    <string name="listo">Listo</string>
 </resources>

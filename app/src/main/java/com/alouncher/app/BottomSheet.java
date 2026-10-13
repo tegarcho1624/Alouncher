@@ -82,6 +82,9 @@ final class BottomSheet {
 
     LinearLayout footer() { return footer; }
 
+    /** Recibe los eventos de arrastre que ocurren dentro de la hoja (coordenadas de la hoja). */
+    void setOnDragListener(View.OnDragListener l) { sheet.setOnDragListener(l); }
+
     /** Abre el teclado al mostrar la hoja (para formularios). */
     void keyboard() { keyboard = true; }
 

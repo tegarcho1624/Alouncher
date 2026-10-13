@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -23,6 +24,7 @@ import android.text.InputType;
 import android.util.TypedValue;
 import android.view.DragEvent;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AccelerateInterpolator;
@@ -37,6 +39,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.PagerSnapHelper;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.text.Collator;
@@ -66,14 +70,34 @@ public class MainActivity extends Activity {
     private CustomizationStore store;
     private HomeStore homeStore;
 
-    // Home
-    private LinearLayout homeGrid;
+    // Home (páginas deslizables + dock)
+    private static final int PAGE_BOTTOM_PAD_DP = 148;
+    private View homeLayer;
+    private RecyclerView pager;
+    private PagesAdapter pagesAdapter;
+    private PageIndicator indicator;
     private TextView homeHint;
     private CappedLinearLayout dock;
-    private final FrameLayout[][] homeCells = new FrameLayout[HomeStore.HOME_ROWS][HomeStore.HOME_COLS];
     private final FrameLayout[] dockSlots = new FrameLayout[HomeStore.DOCK_SLOTS];
     private LongPressDrag placedDrag;
     private View hot; // celda o espacio resaltado durante un arrastre
+    private int currentIndex;  // página que se está viendo
+    private int edgeDir;       // -1 / 0 / 1: ícono arrastrado junto al borde -> cambia de página
+    private final Runnable edgeTask = this::edgeTick;
+
+    // Modo edición (páginas como tarjetas)
+    private View editLayer;
+    private RecyclerView editPager;
+    private EditAdapter editAdapter;
+    private PageIndicator editIndicator;
+    private View editTrash;
+    private View editHint;
+    private LongPressDrag editDrag;
+    private View editHot;
+    private int editCardW;
+    private int editEdgeDir;
+    private boolean editMode;
+    private final Runnable editEdgeTask = this::editEdgeTick;
 
     // Cajón
     private View drawerLayer;
@@ -98,16 +122,46 @@ public class MainActivity extends Activity {
         DragPayload(String key) { this.key = key; }
     }
 
+    private static final class PageDragPayload {
+        final int id;
+        PageDragPayload(int id) { this.id = id; }
+    }
+
     private static final class Target {
         final boolean dock;
+        final int page;
         final int row;
         final int col;
         final View view;
-        Target(boolean dock, int row, int col, View view) {
+        Target(boolean dock, int page, int row, int col, View view) {
             this.dock = dock;
+            this.page = page;
             this.row = row;
             this.col = col;
             this.view = view;
+        }
+    }
+
+    /** Una página de la Home: cuadrícula de celdas. */
+    private static final class PageVH extends RecyclerView.ViewHolder {
+        final LinearLayout root;
+        final FrameLayout[][] cells = new FrameLayout[HomeStore.HOME_ROWS][HomeStore.HOME_COLS];
+        PageVH(LinearLayout root) {
+            super(root);
+            this.root = root;
+        }
+    }
+
+    /** Una tarjeta del modo edición. */
+    private static final class CardVH extends RecyclerView.ViewHolder {
+        final FrameLayout card;
+        final PageThumb thumb;
+        final ImageView house;
+        CardVH(FrameLayout card, PageThumb thumb, ImageView house) {
+            super(card);
+            this.card = card;
+            this.thumb = thumb;
+            this.house = house;
         }
     }
 
@@ -121,7 +175,9 @@ public class MainActivity extends Activity {
             pendingIconKey = savedInstanceState.getString(STATE_PENDING_KEY);
         }
 
-        homeGrid = findViewById(R.id.home_grid);
+        homeLayer = findViewById(R.id.home_layer);
+        pager = findViewById(R.id.home_pager);
+        indicator = findViewById(R.id.page_indicator);
         homeHint = findViewById(R.id.home_hint);
         dock = findViewById(R.id.dock);
         drawerLayer = findViewById(R.id.drawer_layer);
@@ -143,9 +199,10 @@ public class MainActivity extends Activity {
                 if (t instanceof AppEntry) beginDrag(v, ((AppEntry) t).key(), false);
             }
         });
-        buildHomeGrid();
         buildDock();
-        findViewById(R.id.home_layer).setOnDragListener(this::onHomeDrag);
+        buildPager();
+        buildEditMode();
+        homeLayer.setOnDragListener(this::onHomeDrag);
 
         // ---- Cajón (misma lógica de siempre)
         grid.setLayoutManager(new GridLayoutManager(this, DRAWER_COLUMNS));
@@ -204,8 +261,14 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         dismissMenu();
         dismissSheet();
-        if (Intent.ACTION_MAIN.equals(intent.getAction()) && drawerOpen) {
-            closeDrawer(true, false);
+        if (Intent.ACTION_MAIN.equals(intent.getAction())) {
+            if (drawerOpen) closeDrawer(true, false);
+            if (editMode) {
+                currentIndex = Math.max(0, homeStore.mainIndex());
+                exitEditMode(true);
+            } else {
+                goToPage(Math.max(0, homeStore.mainIndex()), true); // HOME siempre lleva a la principal
+            }
         }
     }
 
@@ -214,6 +277,8 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         if (menu != null) {
             dismissMenu();
+        } else if (editMode) {
+            exitEditMode(true);
         } else if (drawerOpen) {
             closeDrawer(true, false);
         }
@@ -323,25 +388,6 @@ public class MainActivity extends Activity {
     //  HOME y DOCK
     // =========================================================================
 
-    private void buildHomeGrid() {
-        homeGrid.removeAllViews();
-        for (int r = 0; r < HomeStore.HOME_ROWS; r++) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            homeGrid.addView(row, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            for (int c = 0; c < HomeStore.HOME_COLS; c++) {
-                FrameLayout cell = new FrameLayout(this);
-                cell.setBackgroundResource(R.drawable.cell_bg);
-                homeCells[r][c] = cell;
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-                lp.setMargins(dp(3), dp(3), dp(3), dp(3));
-                row.addView(cell, lp);
-            }
-        }
-    }
-
     private void buildDock() {
         dock.removeAllViews();
         for (int i = 0; i < HomeStore.DOCK_SLOTS; i++) {
@@ -368,11 +414,91 @@ public class MainActivity extends Activity {
         dock.addView(btnSlot, new LinearLayout.LayoutParams(0, dp(76), 1f));
     }
 
-    /** Redibuja la Home y el dock desde lo guardado. Las apps que ya no existen simplemente no se dibujan. */
-    private void renderHome() {
-        for (FrameLayout[] row : homeCells) {
+    // ---- Páginas de la Home ---------------------------------------------------
+
+    private void buildPager() {
+        pagesAdapter = new PagesAdapter();
+        pager.setLayoutManager(new LinearLayoutManager(this, RecyclerView.HORIZONTAL, false));
+        pager.setAdapter(pagesAdapter);
+        new PagerSnapHelper().attachToRecyclerView(pager);
+        pager.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView rv, int dx, int dy) { syncCurrentFromScroll(); }
+            @Override public void onScrollStateChanged(RecyclerView rv, int newState) {
+                if (newState == RecyclerView.SCROLL_STATE_IDLE) syncCurrentFromScroll();
+            }
+        });
+        indicator.setOnSelect(i -> goToPage(i, true));
+        currentIndex = Math.max(0, homeStore.mainIndex()); // al abrir: la página principal
+        pager.scrollToPosition(currentIndex);
+        syncIndicator();
+    }
+
+    private final class PagesAdapter extends RecyclerView.Adapter<PageVH> {
+        @Override
+        public PageVH onCreateViewHolder(ViewGroup parent, int viewType) {
+            return newPage();
+        }
+
+        @Override
+        public void onBindViewHolder(PageVH h, int position) {
+            bindPage(h, homeStore.pageId(position));
+        }
+
+        @Override
+        public int getItemCount() {
+            return homeStore.pageCount();
+        }
+    }
+
+    private PageVH newPage() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutParams(new RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.setPadding(dp(24), dp(16), dp(24), dp(PAGE_BOTTOM_PAD_DP));
+        PageVH h = new PageVH(root);
+        for (int r = 0; r < HomeStore.HOME_ROWS; r++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            root.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            for (int c = 0; c < HomeStore.HOME_COLS; c++) {
+                FrameLayout cell = new FrameLayout(this);
+                cell.setBackgroundResource(R.drawable.cell_bg);
+                h.cells[r][c] = cell;
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+                lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+                row.addView(cell, lp);
+            }
+        }
+        // Pulsación larga en un espacio vacío (los íconos atienden la suya) -> modo edición
+        root.setLongClickable(true);
+        root.setOnLongClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            enterEditMode();
+            return true;
+        });
+        return h;
+    }
+
+    private void bindPage(PageVH h, int pageId) {
+        for (FrameLayout[] row : h.cells) {
             for (FrameLayout cell : row) cell.removeAllViews();
         }
+        for (Map.Entry<String, HomeStore.Placement> en : homeStore.snapshot().entrySet()) {
+            HomeStore.Placement p = en.getValue();
+            if (p.dock || p.page != pageId) continue;
+            AppEntry app = allApps.get(en.getKey());
+            if (app == null) continue; // desinstalada o aún cargando: no se dibuja, sin errores
+            FrameLayout cell = h.cells[p.row][p.col];
+            cell.addView(makeHomeItem(app, cell));
+        }
+    }
+
+    /** Redibuja páginas, dock, indicador y mensaje desde lo guardado. */
+    private void renderHome() {
+        pagesAdapter.notifyDataSetChanged();
         for (FrameLayout slot : dockSlots) slot.removeAllViews();
 
         int shown = 0;
@@ -383,12 +509,56 @@ public class MainActivity extends Activity {
             if (p.dock) {
                 dockSlots[p.col].addView(makeDockItem(app));
             } else {
-                FrameLayout cell = homeCells[p.row][p.col];
-                cell.addView(makeHomeItem(app, cell));
                 shown++;
             }
         }
+        syncIndicator();
         homeHint.setVisibility(loaded && shown == 0 ? View.VISIBLE : View.GONE);
+    }
+
+    private void syncIndicator() {
+        indicator.setPages(homeStore.pageCount(), homeStore.mainIndex(), currentIndex);
+    }
+
+    private void goToPage(int index, boolean smooth) {
+        if (index < 0 || index >= homeStore.pageCount()) return;
+        currentIndex = index;
+        indicator.setCurrent(index);
+        if (smooth) pager.smoothScrollToPosition(index); else pager.scrollToPosition(index);
+    }
+
+    private void syncCurrentFromScroll() {
+        if (editMode) return;
+        int idx = indexFromScroll(pager);
+        if (idx >= 0 && idx != currentIndex) {
+            currentIndex = idx;
+            indicator.setCurrent(idx);
+        }
+    }
+
+    /** Página más cercana al centro según el desplazamiento de un carrusel horizontal (con o sin relleno/márgenes). */
+    private int indexFromScroll(RecyclerView rv) {
+        RecyclerView.LayoutManager m = rv.getLayoutManager();
+        if (!(m instanceof LinearLayoutManager)) return -1;
+        LinearLayoutManager lm = (LinearLayoutManager) m;
+        int first = lm.findFirstVisibleItemPosition();
+        if (first < 0) return -1;
+        View v = lm.findViewByPosition(first);
+        if (v == null || v.getWidth() == 0) return -1;
+        ViewGroup.LayoutParams raw = v.getLayoutParams();
+        int ml = 0;
+        int mr = 0;
+        if (raw instanceof ViewGroup.MarginLayoutParams) {
+            ml = ((ViewGroup.MarginLayoutParams) raw).leftMargin;
+            mr = ((ViewGroup.MarginLayoutParams) raw).rightMargin;
+        }
+        float pos = first + (rv.getPaddingLeft() + ml - v.getLeft()) / (float) (v.getWidth() + ml + mr);
+        return Math.max(0, Math.min(homeStore.pageCount() - 1, Math.round(pos)));
+    }
+
+    private PageVH currentPageHolder() {
+        RecyclerView.ViewHolder vh = pager.findViewHolderForAdapterPosition(currentIndex);
+        return vh instanceof PageVH ? (PageVH) vh : null;
     }
 
     private View makeHomeItem(AppEntry app, FrameLayout cell) {
@@ -503,21 +673,26 @@ public class MainActivity extends Activity {
             case DragEvent.ACTION_DRAG_LOCATION: {
                 Target t = targetAt(e.getX(), e.getY());
                 setHot(t != null ? t.view : null);
+                // junto al borde: pasa a la página vecina para poder soltar allí
+                setEdgeDir(e.getX() < dp(48) ? -1 : (e.getX() > v.getWidth() - dp(48) ? 1 : 0));
                 return true;
             }
             case DragEvent.ACTION_DRAG_EXITED:
                 setHot(null);
+                setEdgeDir(0);
                 return true;
             case DragEvent.ACTION_DROP: {
                 Target t = targetAt(e.getX(), e.getY());
                 setHot(null);
+                setEdgeDir(0);
                 if (t == null) return false; // soltado fuera de la cuadrícula y del dock: no pasa nada
-                int res = homeStore.drop(payload.key, t.dock, t.row, t.col);
+                int res = homeStore.drop(payload.key, t.dock, t.page, t.row, t.col);
                 if (res == HomeStore.FULL) toast(t.dock ? R.string.dock_lleno : R.string.home_llena);
                 return true;
             }
             case DragEvent.ACTION_DRAG_ENDED:
                 setHot(null);
+                setEdgeDir(0);
                 ui.post(this::renderHome); // también restaura el ícono "levantado" si no se movió
                 return true;
             default:
@@ -525,7 +700,23 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** ¿Qué espacio del dock o celda de la Home hay bajo el dedo? (coordenadas de la capa Home) */
+    private void setEdgeDir(int dir) {
+        if (dir == edgeDir) return;
+        edgeDir = dir;
+        ui.removeCallbacks(edgeTask);
+        if (dir != 0) ui.postDelayed(edgeTask, 650);
+    }
+
+    private void edgeTick() {
+        if (edgeDir == 0) return;
+        int target = currentIndex + edgeDir;
+        if (target < 0 || target >= homeStore.pageCount()) return;
+        setHot(null);
+        goToPage(target, true);
+        ui.postDelayed(edgeTask, 900);
+    }
+
+    /** ¿Qué espacio del dock o celda de la página actual hay bajo el dedo? (coordenadas de la capa Home) */
     private Target targetAt(float x, float y) {
         if (y >= dock.getTop() - dp(16) && y <= dock.getBottom() + dp(16)
                 && x >= dock.getLeft() && x <= dock.getRight()) {
@@ -539,17 +730,23 @@ public class MainActivity extends Activity {
                     best = i;
                 }
             }
-            return new Target(true, 0, best, dockSlots[best]);
+            return new Target(true, 0, 0, best, dockSlots[best]);
         }
 
-        float left = homeGrid.getLeft() + homeGrid.getPaddingLeft();
-        float top = homeGrid.getTop() + homeGrid.getPaddingTop();
-        float w = homeGrid.getWidth() - homeGrid.getPaddingLeft() - homeGrid.getPaddingRight();
-        float h = homeGrid.getHeight() - homeGrid.getPaddingTop() - homeGrid.getPaddingBottom();
-        if (w <= 0 || h <= 0 || x < left || x > left + w || y < top || y > top + h) return null;
+        PageVH h = currentPageHolder();
+        if (h == null) return null;
+        int[] a = new int[2];
+        int[] b = new int[2];
+        homeLayer.getLocationOnScreen(a);
+        h.root.getLocationOnScreen(b);
+        float left = b[0] - a[0] + h.root.getPaddingLeft();
+        float top = b[1] - a[1] + h.root.getPaddingTop();
+        float w = h.root.getWidth() - h.root.getPaddingLeft() - h.root.getPaddingRight();
+        float hh = h.root.getHeight() - h.root.getPaddingTop() - h.root.getPaddingBottom();
+        if (w <= 0 || hh <= 0 || x < left || x > left + w || y < top || y > top + hh) return null;
         int c = Math.min(HomeStore.HOME_COLS - 1, (int) ((x - left) / (w / HomeStore.HOME_COLS)));
-        int r = Math.min(HomeStore.HOME_ROWS - 1, (int) ((y - top) / (h / HomeStore.HOME_ROWS)));
-        return new Target(false, r, c, homeCells[r][c]);
+        int r = Math.min(HomeStore.HOME_ROWS - 1, (int) ((y - top) / (hh / HomeStore.HOME_ROWS)));
+        return new Target(false, homeStore.pageId(currentIndex), r, c, h.cells[r][c]);
     }
 
     private void setHot(View v) {
@@ -557,6 +754,333 @@ public class MainActivity extends Activity {
         if (hot != null) hot.setActivated(false);
         hot = v;
         if (v != null) v.setActivated(true);
+    }
+
+    // =========================================================================
+    //  Modo edición de la Home: páginas como tarjetas (mantener pulsado un espacio vacío)
+    // =========================================================================
+
+    private void buildEditMode() {
+        editLayer = findViewById(R.id.edit_layer);
+        editPager = findViewById(R.id.edit_pager);
+        editIndicator = findViewById(R.id.edit_indicator);
+        editTrash = findViewById(R.id.edit_trash);
+        editHint = findViewById(R.id.edit_hint);
+
+        editDrag = new LongPressDrag(this, new LongPressDrag.Listener() {
+            @Override public void onLongPress(View v) { }
+            @Override public void onDragStart(View v) { startPageDrag(v); }
+        });
+        editAdapter = new EditAdapter();
+        editPager.setLayoutManager(new LinearLayoutManager(this, RecyclerView.HORIZONTAL, false));
+        editPager.setAdapter(editAdapter);
+        new PagerSnapHelper().attachToRecyclerView(editPager);
+        editPager.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView rv, int dx, int dy) { syncEditFromScroll(); }
+            @Override public void onScrollStateChanged(RecyclerView rv, int newState) {
+                if (newState == RecyclerView.SCROLL_STATE_IDLE) syncEditFromScroll();
+            }
+        });
+        editIndicator.setOnSelect(i -> editPager.smoothScrollToPosition(i));
+
+        findViewById(R.id.edit_done).setOnClickListener(v -> exitEditMode(true));
+        findViewById(R.id.edit_add_left).setOnClickListener(v -> addPageAt(currentIndex));
+        findViewById(R.id.edit_add_right).setOnClickListener(v -> addPageAt(currentIndex + 1));
+        findViewById(R.id.edit_action_themes).setOnClickListener(v -> openSoon(R.string.fondos_temas));
+        findViewById(R.id.edit_action_widgets).setOnClickListener(v -> openSoon(R.string.widgets));
+        findViewById(R.id.edit_action_config).setOnClickListener(v -> openSoon(R.string.config_home));
+        editLayer.setOnDragListener(this::onEditDrag);
+    }
+
+    private void openSoon(int titleRes) {
+        startActivity(new Intent(this, ComingSoonActivity.class)
+                .putExtra(ComingSoonActivity.EXTRA_TITLE, getString(titleRes)));
+    }
+
+    private void enterEditMode() {
+        if (editMode || drawerOpen) return;
+        editMode = true;
+        dismissMenu();
+        dismissSheet();
+
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        editCardW = Math.round(screenW * 0.82f);
+        int pad = Math.max(0, (screenW - editCardW - dp(16)) / 2); // centra la tarjeta; las vecinas asoman
+        editPager.setPadding(pad, 0, pad, 0);
+        editAdapter.notifyDataSetChanged();
+        editPager.scrollToPosition(currentIndex);
+        syncEditIndicator();
+
+        homeLayer.animate().cancel();
+        editLayer.animate().cancel();
+        editLayer.setAlpha(0f);
+        editLayer.setScaleX(1.05f);
+        editLayer.setScaleY(1.05f);
+        editLayer.setVisibility(View.VISIBLE);
+        editLayer.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).start();
+        homeLayer.animate().alpha(0f).setDuration(180)
+                .withEndAction(() -> {
+                    if (editMode) homeLayer.setVisibility(View.INVISIBLE);
+                }).start();
+    }
+
+    private void exitEditMode(boolean animate) {
+        if (!editMode) return;
+        editMode = false;
+        setEditEdge(0);
+        setEditHot(null);
+        homeLayer.animate().cancel();
+        editLayer.animate().cancel();
+        homeLayer.setVisibility(View.VISIBLE);
+        pager.scrollToPosition(currentIndex);
+        syncIndicator();
+        if (!animate) {
+            homeLayer.setAlpha(1f);
+            editLayer.setVisibility(View.GONE);
+            return;
+        }
+        homeLayer.setAlpha(0f);
+        homeLayer.animate().alpha(1f).setDuration(220).start();
+        editLayer.animate().alpha(0f).setDuration(180)
+                .withEndAction(() -> {
+                    if (!editMode) editLayer.setVisibility(View.GONE);
+                }).start();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (editMode) exitEditMode(false); // las tarjetas se dimensionan al entrar
+    }
+
+    private void syncEditIndicator() {
+        editIndicator.setPages(homeStore.pageCount(), homeStore.mainIndex(), currentIndex);
+    }
+
+    private void syncEditFromScroll() {
+        if (!editMode) return;
+        int idx = indexFromScroll(editPager);
+        if (idx >= 0 && idx != currentIndex) {
+            currentIndex = idx;
+            editIndicator.setCurrent(idx);
+        }
+    }
+
+    private void fillThumb(PageThumb thumb, int pageId) {
+        List<Drawable> icons = new ArrayList<>();
+        List<int[]> cells = new ArrayList<>();
+        for (Map.Entry<String, HomeStore.Placement> en : homeStore.snapshot().entrySet()) {
+            HomeStore.Placement p = en.getValue();
+            if (p.dock || p.page != pageId) continue;
+            AppEntry app = allApps.get(en.getKey());
+            if (app == null) continue;
+            icons.add(app.newIcon(getResources()));
+            cells.add(new int[]{p.row, p.col});
+        }
+        thumb.setItems(icons, cells);
+    }
+
+    private final class EditAdapter extends RecyclerView.Adapter<CardVH> {
+        @Override
+        public CardVH onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout card = new FrameLayout(MainActivity.this);
+            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
+                    editCardW, ViewGroup.LayoutParams.MATCH_PARENT);
+            lp.setMargins(dp(8), 0, dp(8), 0);
+            card.setLayoutParams(lp);
+            card.setBackgroundResource(R.drawable.page_card_bg);
+
+            PageThumb thumb = new PageThumb(MainActivity.this);
+            card.addView(thumb, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+            ImageView house = new ImageView(MainActivity.this);
+            house.setImageResource(R.drawable.ic_home);
+            FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(
+                    dp(30), dp(30), Gravity.TOP | Gravity.START);
+            hp.setMargins(dp(14), dp(14), 0, 0);
+            card.addView(house, hp);
+
+            editDrag.attach(card); // pulsación larga + mover = arrastrar la página
+            return new CardVH(card, thumb, house);
+        }
+
+        @Override
+        public void onBindViewHolder(CardVH h, int position) {
+            int id = homeStore.pageId(position);
+            ViewGroup.LayoutParams lp = h.card.getLayoutParams();
+            if (lp.width != editCardW) {
+                lp.width = editCardW;
+                h.card.setLayoutParams(lp);
+            }
+            h.card.setTag(id);
+            h.card.setAlpha(1f);
+            h.card.setActivated(false);
+            h.house.setVisibility(id == homeStore.mainId() ? View.VISIBLE : View.GONE);
+            fillThumb(h.thumb, id);
+            h.card.setOnClickListener(v -> {
+                int p = h.getBindingAdapterPosition();
+                if (p != RecyclerView.NO_POSITION) editPager.smoothScrollToPosition(p);
+            });
+        }
+
+        @Override
+        public int getItemCount() {
+            return homeStore.pageCount();
+        }
+    }
+
+    // ---- Añadir / eliminar / reordenar páginas ------------------------------
+
+    private void afterPagesChanged() {
+        renderHome();
+        pager.scrollToPosition(currentIndex);
+        editAdapter.notifyDataSetChanged();
+        editPager.scrollToPosition(currentIndex);
+        syncEditIndicator();
+    }
+
+    /** "+" izquierdo: index = actual (queda a su izquierda). "+" derecho: index = actual + 1. */
+    private void addPageAt(int index) {
+        int id = homeStore.insertPage(index);
+        if (id < 0) {
+            toast(R.string.max_paginas);
+            return;
+        }
+        currentIndex = homeStore.indexOf(id); // la nueva página, vacía, pasa a ser la actual
+        afterPagesChanged();
+    }
+
+    private boolean canDeletePage(int id) {
+        return homeStore.pageCount() > 1 && id != homeStore.mainId();
+    }
+
+    private void tryDeletePage(int id) {
+        if (id == homeStore.mainId()) {
+            toast(R.string.pagina_principal_no);
+            return;
+        }
+        if (homeStore.pageCount() <= 1) {
+            toast(R.string.pagina_unica_no);
+            return;
+        }
+        int curId = homeStore.pageId(currentIndex);
+        if (!homeStore.removePage(id)) return;
+        currentIndex = (id == curId) ? Math.max(0, homeStore.mainIndex()) : homeStore.indexOf(curId);
+        afterPagesChanged();
+        toast(R.string.pagina_eliminada);
+    }
+
+    private void reorderPage(int srcId, int dstId) {
+        int from = homeStore.indexOf(srcId);
+        int to = homeStore.indexOf(dstId);
+        if (from < 0 || to < 0 || from == to) return;
+        int curId = homeStore.pageId(currentIndex);
+        homeStore.movePage(from, to);
+        currentIndex = homeStore.indexOf(curId);
+        afterPagesChanged();
+    }
+
+    // ---- Arrastre de tarjetas ------------------------------------------------
+
+    private void startPageDrag(View v) {
+        Object tag = v.getTag();
+        if (!(tag instanceof Integer)) return;
+        int id = (Integer) tag;
+        boolean started = v.startDragAndDrop(ClipData.newPlainText("page", String.valueOf(id)),
+                new View.DragShadowBuilder(v), new PageDragPayload(id), 0);
+        if (!started) return;
+        v.setAlpha(0.35f);
+        editTrash.setAlpha(canDeletePage(id) ? 1f : 0.35f); // principal / única: papelera atenuada
+        editTrash.setVisibility(View.VISIBLE);
+        editHint.setVisibility(View.INVISIBLE);
+    }
+
+    private boolean onEditDrag(View root, DragEvent e) {
+        Object ls = e.getLocalState();
+        if (!(ls instanceof PageDragPayload)) return false;
+        int id = ((PageDragPayload) ls).id;
+
+        switch (e.getAction()) {
+            case DragEvent.ACTION_DRAG_STARTED:
+                return true;
+            case DragEvent.ACTION_DRAG_ENTERED:
+            case DragEvent.ACTION_DRAG_LOCATION:
+                setEditHot(editTargetAt(root, e.getX(), e.getY()));
+                setEditEdge(e.getX() < dp(56) ? -1 : (e.getX() > root.getWidth() - dp(56) ? 1 : 0));
+                return true;
+            case DragEvent.ACTION_DRAG_EXITED:
+                setEditHot(null);
+                setEditEdge(0);
+                return true;
+            case DragEvent.ACTION_DROP: {
+                View t = editTargetAt(root, e.getX(), e.getY());
+                setEditHot(null);
+                setEditEdge(0);
+                if (t == editTrash) {
+                    tryDeletePage(id);                 // sobre la papelera: eliminar
+                } else if (t != null && t.getTag() instanceof Integer) {
+                    reorderPage(id, (Integer) t.getTag()); // sobre otra tarjeta: reordenar
+                }
+                return true;                           // en otro lugar: no pasa nada
+            }
+            case DragEvent.ACTION_DRAG_ENDED:
+                setEditHot(null);
+                setEditEdge(0);
+                editTrash.setVisibility(View.INVISIBLE);
+                editHint.setVisibility(View.VISIBLE);
+                ui.post(() -> {
+                    if (!editMode) return;
+                    editAdapter.notifyDataSetChanged();   // la tarjeta vuelve a su lugar
+                    editPager.smoothScrollToPosition(currentIndex);
+                });
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private View editTargetAt(View root, float x, float y) {
+        if (editTrash.getVisibility() == View.VISIBLE && hitOn(editTrash, root, x, y, dp(20))) {
+            return editTrash;
+        }
+        for (int i = 0; i < editPager.getChildCount(); i++) {
+            View c = editPager.getChildAt(i);
+            if (hitOn(c, root, x, y, 0)) return c;
+        }
+        return null;
+    }
+
+    private boolean hitOn(View v, View root, float x, float y, int slack) {
+        int[] a = new int[2];
+        int[] b = new int[2];
+        root.getLocationOnScreen(a);
+        v.getLocationOnScreen(b);
+        float l = b[0] - a[0] - slack;
+        float t = b[1] - a[1] - slack;
+        return x >= l && x <= l + v.getWidth() + 2 * slack
+                && y >= t && y <= t + v.getHeight() + 2 * slack;
+    }
+
+    private void setEditHot(View v) {
+        if (editHot == v) return;
+        if (editHot != null) editHot.setActivated(false);
+        editHot = v;
+        if (v != null) v.setActivated(true);
+    }
+
+    /** Arrastrando una tarjeta junto al borde, el carrusel se desplaza para alcanzar otras páginas. */
+    private void setEditEdge(int dir) {
+        if (dir == editEdgeDir) return;
+        editEdgeDir = dir;
+        ui.removeCallbacks(editEdgeTask);
+        if (dir != 0) ui.post(editEdgeTask);
+    }
+
+    private void editEdgeTick() {
+        if (editEdgeDir == 0 || !editMode) return;
+        editPager.scrollBy(editEdgeDir * dp(14), 0);
+        ui.postDelayed(editEdgeTask, 16);
     }
 
     // =========================================================================

@@ -36,5 +36,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- Pantallas provisionales ("Próximamente") -->
+        <activity
+            android:name=".ComingSoonActivity"
+            android:exported="false"
+            android:theme="@style/ScreenTheme" />
     </application>
 </manifest>
