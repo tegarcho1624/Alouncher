@@ -115,6 +115,7 @@ public class MainActivity extends Activity {
     private Map<String, AppEntry> allApps = new HashMap<>(); // visibles + ocultas, por clave
     private List<AppEntry> hiddenApps = new ArrayList<>();
     private boolean loaded;
+    private int fontApplied = -1; // versión de la fuente que ya está aplicada a las vistas
     private boolean pruneOnNextLoad = true;
     private String pendingIconKey; // entrada (paquete/actividad) a la que se le elige ícono
 
@@ -184,6 +185,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FontManager.init(this);
         setContentView(R.layout.activity_main);
         store = new CustomizationStore(this);
         homeStore = new HomeStore(this);
@@ -262,6 +264,9 @@ public class MainActivity extends Activity {
         f.addDataScheme("package");
         registerReceiver(pkgReceiver, f);
 
+        FontManager.apply(getWindow().getDecorView()); // textos fijos (cajón, modo edición, mensaje)
+        fontApplied = FontManager.version();
+
         reload();
     }
 
@@ -269,6 +274,17 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putString(STATE_PENDING_KEY, pendingIconKey);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (fontApplied != FontManager.version()) {
+            fontApplied = FontManager.version();
+            FontManager.apply(getWindow().getDecorView());
+            adapter.notifyDataSetChanged(); // nombres del cajón
+            renderHome();                   // nombres de la Home
+        }
     }
 
     /**
@@ -587,6 +603,7 @@ public class MainActivity extends Activity {
         icon.setImageDrawable(app.newIcon(getResources()));
         label.setText(app.label());
         label.setShadowLayer(dp(3), 0, dp(1), 0xCC000000); // legible sobre cualquier fondo
+        FontManager.applyTo(label);
         item.setTag(new Placed(app, inst.id));              // esta INSTANCIA, no solo la app
         item.setOnClickListener(v -> openApp(app));         // todas las instancias abren la misma app
         placedDrag.attach(item);
@@ -842,7 +859,8 @@ public class MainActivity extends Activity {
         findViewById(R.id.edit_add_right).setOnClickListener(v -> addPageAt(currentIndex + 1));
         findViewById(R.id.edit_action_themes).setOnClickListener(v -> openSoon(R.string.fondos_temas));
         findViewById(R.id.edit_action_widgets).setOnClickListener(v -> openSoon(R.string.widgets));
-        findViewById(R.id.edit_action_config).setOnClickListener(v -> openSoon(R.string.config_home));
+        findViewById(R.id.edit_action_config).setOnClickListener(v ->
+                startActivity(new Intent(this, HomeSettingsActivity.class)));
         editLayer.setOnDragListener(this::onEditDrag);
     }
 
@@ -1394,6 +1412,7 @@ public class MainActivity extends Activity {
 
     private void popup(View anchor, LinearLayout col) {
         dismissMenu();
+        FontManager.apply(col);
         menu = new PopupWindow(col, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, true);
         menu.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));

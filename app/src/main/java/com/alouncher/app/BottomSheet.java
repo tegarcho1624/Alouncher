@@ -89,6 +89,7 @@ final class BottomSheet {
     void keyboard() { keyboard = true; }
 
     void show() {
+        FontManager.apply(sheet);
         dialog.setContentView(sheet);
         Window w = dialog.getWindow();
         if (w != null) {

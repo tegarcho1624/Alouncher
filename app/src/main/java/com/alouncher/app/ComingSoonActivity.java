@@ -15,6 +15,7 @@ public class ComingSoonActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FontManager.init(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -50,6 +51,7 @@ public class ComingSoonActivity extends Activity {
         bp.topMargin = BottomSheet.dp(this, 28);
         root.addView(back, bp);
 
+        FontManager.apply(root);
         setContentView(root);
     }
 }

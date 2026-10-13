@@ -42,5 +42,16 @@
             android:name=".ComingSoonActivity"
             android:exported="false"
             android:theme="@style/ScreenTheme" />
+
+        <!-- Configuración de pantalla principal y selector de fuentes -->
+        <activity
+            android:name=".HomeSettingsActivity"
+            android:exported="false"
+            android:theme="@style/ScreenTheme" />
+        <activity
+            android:name=".FontsActivity"
+            android:exported="false"
+            android:theme="@style/ScreenTheme"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

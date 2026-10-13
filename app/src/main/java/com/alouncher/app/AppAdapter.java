@@ -74,6 +74,7 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
             h.itemView.setTag(null);
             h.icon.setImageResource(R.drawable.ic_hidden_cell);
             h.label.setText(R.string.apps_ocultas);
+            FontManager.applyTo(h.label);
             h.itemView.setOnClickListener(v -> listener.onHiddenApps());
             return;
         }
@@ -81,6 +82,7 @@ final class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
         h.itemView.setTag(app);
         h.icon.setImageDrawable(app.newIcon(h.itemView.getResources()));
         h.label.setText(app.label());
+        FontManager.applyTo(h.label);
         h.itemView.setOnClickListener(v -> listener.onOpen(app));
     }
 

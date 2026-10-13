@@ -46,4 +46,18 @@
 
     <string name="editar_ayuda">Mantén presionada una página y arrástrala: suéltala sobre otra para reordenar, o deslízala hacia arriba para eliminarla.</string>
     <string name="listo">Listo</string>
+
+    <string name="estilo_escritura">Estilo de Escritura</string>
+    <string name="estilos">Estilos</string>
+    <string name="disposicion">Cambiar la disposición de la pantalla de inicio</string>
+    <string name="importar_fuente">Importar fuente</string>
+    <string name="buscar">Buscar</string>
+    <string name="buscar_fuente">Buscar fuente</string>
+    <string name="sin_resultados">Sin resultados</string>
+    <string name="fuente_importada">«%1$s» importada</string>
+    <string name="fuente_actualizada">«%1$s» actualizada</string>
+    <string name="fuente_no_valida">Ese archivo no es una fuente válida</string>
+    <string name="elegir_ttf">Elige un archivo .ttf u .otf</string>
+    <string name="error_importar">No se pudo importar la fuente</string>
+    <string name="atras">Atrás</string>
 </resources>
