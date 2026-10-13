@@ -11,6 +11,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -43,6 +44,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.PagerSnapHelper;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.File;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -116,6 +118,10 @@ public class MainActivity extends Activity {
     private List<AppEntry> hiddenApps = new ArrayList<>();
     private boolean loaded;
     private int fontApplied = -1; // versión de la fuente que ya está aplicada a las vistas
+    private BackdropView homeBackdrop;   // fondo de la Home
+    private BackdropView drawerBackdrop; // fondo del cajón
+    private final ExecutorService bgIo = Executors.newSingleThreadExecutor();
+    private int bgApplied = -1;          // versión de los fondos que ya está aplicada
     private boolean pruneOnNextLoad = true;
     private String pendingIconKey; // entrada (paquete/actividad) a la que se le elige ícono
 
@@ -202,6 +208,9 @@ public class MainActivity extends Activity {
         drawerLayer = findViewById(R.id.drawer_layer);
         drawerScrim = findViewById(R.id.drawer_scrim);
         drawerSheet = findViewById(R.id.drawer_sheet);
+        homeBackdrop = findViewById(R.id.home_bg);
+        drawerBackdrop = findViewById(R.id.drawer_bg);
+        drawerBackdrop.setTopCornerRadius(dp(32)); // sigue la forma redondeada del cajón
         grid = findViewById(R.id.grid);
 
         dock.setMaxWidth(dp(720));
@@ -267,6 +276,7 @@ public class MainActivity extends Activity {
         FontManager.apply(getWindow().getDecorView()); // textos fijos (cajón, modo edición, mensaje)
         fontApplied = FontManager.version();
 
+        applyBackgrounds();
         reload();
     }
 
@@ -279,6 +289,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (bgApplied != BackgroundStore.version()) applyBackgrounds();
         if (fontApplied != FontManager.version()) {
             fontApplied = FontManager.version();
             FontManager.apply(getWindow().getDecorView());
@@ -326,6 +337,7 @@ public class MainActivity extends Activity {
         dismissSheet();
         if (pkgReceiver != null) unregisterReceiver(pkgReceiver);
         io.shutdownNow();
+        bgIo.shutdownNow();
         super.onDestroy();
     }
 
@@ -391,6 +403,47 @@ public class MainActivity extends Activity {
                 renderHome();
             });
         });
+    }
+
+    // =========================================================================
+    //  Fondos (Fondos y temas): imagen elegida para la Home y para el cajón
+    // =========================================================================
+
+    private void applyBackgrounds() {
+        if (bgIo.isShutdown()) return;
+        bgApplied = BackgroundStore.version();
+        final int w = getResources().getDisplayMetrics().widthPixels;
+        final int h = getResources().getDisplayMetrics().heightPixels;
+        final Context app = getApplicationContext();
+        bgIo.execute(() -> {
+            // Si el archivo ya no existe, resolveCurrent salta al siguiente de la lista (o a ninguno)
+            File hf = BackgroundStore.resolveCurrent(app, BackgroundStore.HOME, BackgroundStore.IMAGE);
+            Bitmap hb = hf != null ? ImageUtil.decodeSampled(hf, w, h) : null;
+            String hMode = BackgroundStore.load(app, BackgroundStore.HOME, BackgroundStore.IMAGE).mode;
+
+            File df = BackgroundStore.resolveCurrent(app, BackgroundStore.DRAWER, BackgroundStore.IMAGE);
+            Bitmap db = df != null ? ImageUtil.decodeSampled(df, w, h) : null;
+            String dMode = BackgroundStore.load(app, BackgroundStore.DRAWER, BackgroundStore.IMAGE).mode;
+
+            ui.post(() -> {
+                if (isDestroyed()) return;
+                showHomeBackground(hb, hMode);
+                if (db != null) drawerBackdrop.showImage(db, dMode); else drawerBackdrop.clear();
+            });
+        });
+    }
+
+    private void showHomeBackground(Bitmap bmp, String mode) {
+        if (bmp != null) {
+            homeBackdrop.showImage(bmp, mode);
+        } else {
+            homeBackdrop.clear(); // vuelve el fondo de pantalla del sistema
+        }
+        // Con fondo propio, las barras del sistema van en el color base (como en Voltea);
+        // sin él, transparentes para que se vea el fondo del sistema.
+        int bar = bmp != null ? getColor(R.color.bg) : Color.TRANSPARENT;
+        getWindow().setStatusBarColor(bar);
+        getWindow().setNavigationBarColor(bar);
     }
 
     // =========================================================================
@@ -857,7 +910,8 @@ public class MainActivity extends Activity {
         findViewById(R.id.edit_done).setOnClickListener(v -> exitEditMode(true));
         findViewById(R.id.edit_add_left).setOnClickListener(v -> addPageAt(currentIndex));
         findViewById(R.id.edit_add_right).setOnClickListener(v -> addPageAt(currentIndex + 1));
-        findViewById(R.id.edit_action_themes).setOnClickListener(v -> openSoon(R.string.fondos_temas));
+        findViewById(R.id.edit_action_themes).setOnClickListener(v ->
+                startActivity(new Intent(this, BackgroundsActivity.class)));
         findViewById(R.id.edit_action_widgets).setOnClickListener(v -> openSoon(R.string.widgets));
         findViewById(R.id.edit_action_config).setOnClickListener(v ->
                 startActivity(new Intent(this, HomeSettingsActivity.class)));

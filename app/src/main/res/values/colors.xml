@@ -16,4 +16,6 @@
     <color name="scrim">#B8080604</color>
     <color name="drop_hl">#33C9A24B</color>
     <color name="drop_hl_line">#99C9A24B</color>
+    <color name="sf3">#26211A</color>
+    <color name="danger">#D17A68</color>
 </resources>

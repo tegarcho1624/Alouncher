@@ -60,4 +60,40 @@
     <string name="elegir_ttf">Elige un archivo .ttf u .otf</string>
     <string name="error_importar">No se pudo importar la fuente</string>
     <string name="atras">Atrás</string>
+
+    <string name="seg_home">Home</string>
+    <string name="seg_drawer">App Drawer</string>
+    <string name="fila_fondo">Fondo</string>
+    <string name="fila_fondo_animado">Fondo animado</string>
+    <string name="fila_audio">Audio</string>
+    <string name="elegir">ELEGIR</string>
+    <string name="sin_fondo">Sin fondo</string>
+    <string name="solo_home">Solo en la Home</string>
+    <string name="fondo_de">Fondo · %1$s</string>
+    <string name="aplicado">Aplicado: %1$s</string>
+    <string name="sin_fondo_sistema">Sin fondo: se usa el fondo de pantalla del sistema</string>
+    <string name="sin_fondo_drawer">Sin fondo: se usa el color del cajón</string>
+    <string name="modo_rellenar">Rellenar</string>
+    <string name="modo_estirar">Estirar</string>
+    <string name="modo_centrada">Centrada</string>
+    <string name="anadir_imagenes">Añadir imágenes del dispositivo</string>
+    <string name="quitar_fondo">Quitar fondo</string>
+    <string name="vacio_imagenes">Aún no hay imágenes. Añade una del dispositivo.</string>
+    <string name="eliminar_recurso">Eliminar</string>
+    <string name="arrastrar_ordenar">Arrastrar para ordenar</string>
+    <string name="confirmar_eliminar">¿Eliminar?</string>
+    <string name="confirmar_eliminar_detalle">«%1$s» se borrará de la lista y del almacenamiento del launcher.</string>
+    <string name="si">Sí</string>
+    <string name="no">No</string>
+    <string name="fondo_aplicado">Fondo aplicado</string>
+    <string name="fondo_quitado">Fondo quitado</string>
+    <string name="error_importar_archivo">No se pudo importar el archivo</string>
+    <plurals name="imagenes">
+        <item quantity="one">%d imagen</item>
+        <item quantity="other">%d imágenes</item>
+    </plurals>
+    <plurals name="imagenes_anadidas">
+        <item quantity="one">%d imagen añadida</item>
+        <item quantity="other">%d imágenes añadidas</item>
+    </plurals>
 </resources>

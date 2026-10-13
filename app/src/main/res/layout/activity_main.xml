@@ -4,6 +4,12 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <!-- Fondo de la Home (detrás de los íconos). Sin fondo elegido queda transparente y se ve el del sistema -->
+    <com.alouncher.app.BackdropView
+        android:id="@+id/home_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <!-- ============ HOME ============ -->
     <FrameLayout
         android:id="@+id/home_layer"
@@ -312,8 +318,24 @@
             android:layout_marginTop="80dp"
             android:background="@drawable/drawer_bg"
             android:orientation="vertical"
-            android:paddingHorizontal="20dp"
-            android:paddingTop="10dp">
+>
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+                <!-- Fondo del cajón (detrás de los íconos) -->
+                <com.alouncher.app.BackdropView
+                    android:id="@+id/drawer_bg"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="20dp"
+                    android:paddingTop="10dp">
+
 
             <View
                 android:layout_width="38dp"
@@ -363,6 +385,9 @@
                 android:paddingBottom="16dp"
                 android:paddingTop="8dp"
                 android:scrollbars="none" />
+        
+                </LinearLayout>
+            </FrameLayout>
         </com.alouncher.app.DrawerSheet>
     </FrameLayout>
 </FrameLayout>

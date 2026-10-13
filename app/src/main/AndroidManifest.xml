@@ -53,5 +53,15 @@
             android:exported="false"
             android:theme="@style/ScreenTheme"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- Fondos y temas -->
+        <activity
+            android:name=".BackgroundsActivity"
+            android:exported="false"
+            android:theme="@style/ScreenTheme" />
+        <activity
+            android:name=".PlaylistActivity"
+            android:exported="false"
+            android:theme="@style/ScreenTheme" />
     </application>
 </manifest>
