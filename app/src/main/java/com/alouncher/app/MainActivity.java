@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
     private PageIndicator indicator;
     private TextView homeHint;
     private CappedLinearLayout dock;
+    private View homeTrash;
     private final FrameLayout[] dockSlots = new FrameLayout[HomeStore.DOCK_SLOTS];
     private LongPressDrag placedDrag;
     private View hot; // celda o espacio resaltado durante un arrastre
@@ -117,9 +118,24 @@ public class MainActivity extends Activity {
     private boolean pruneOnNextLoad = true;
     private String pendingIconKey; // entrada (paquete/actividad) a la que se le elige ícono
 
+    /** instanceId == null: viene del cajón (se crea una instancia nueva). Si no: se mueve esa instancia. */
     private static final class DragPayload {
         final String key;
-        DragPayload(String key) { this.key = key; }
+        final String instanceId;
+        DragPayload(String key, String instanceId) {
+            this.key = key;
+            this.instanceId = instanceId;
+        }
+    }
+
+    /** Lo que lleva como etiqueta cada ícono colocado en la Home o el dock. */
+    private static final class Placed {
+        final AppEntry app;
+        final String instanceId;
+        Placed(AppEntry app, String instanceId) {
+            this.app = app;
+            this.instanceId = instanceId;
+        }
     }
 
     private static final class PageDragPayload {
@@ -180,6 +196,7 @@ public class MainActivity extends Activity {
         indicator = findViewById(R.id.page_indicator);
         homeHint = findViewById(R.id.home_hint);
         dock = findViewById(R.id.dock);
+        homeTrash = findViewById(R.id.home_trash);
         drawerLayer = findViewById(R.id.drawer_layer);
         drawerScrim = findViewById(R.id.drawer_scrim);
         drawerSheet = findViewById(R.id.drawer_sheet);
@@ -192,11 +209,13 @@ public class MainActivity extends Activity {
         placedDrag = new LongPressDrag(this, new LongPressDrag.Listener() {
             @Override public void onLongPress(View v) {
                 Object t = v.getTag();
-                if (t instanceof AppEntry) showPlacedMenu(v, (AppEntry) t);
+                if (t instanceof Placed) showPlacedMenu(v, (Placed) t);
             }
             @Override public void onDragStart(View v) {
                 Object t = v.getTag();
-                if (t instanceof AppEntry) beginDrag(v, ((AppEntry) t).key(), false);
+                if (t instanceof Placed) {
+                    beginDrag(v, ((Placed) t).app.key(), ((Placed) t).instanceId);
+                }
             }
         });
         buildDock();
@@ -212,7 +231,7 @@ public class MainActivity extends Activity {
                 closeDrawer(false, false);
             }
             @Override public void onMenu(View anchor, AppEntry app) { showMenu(anchor, app); }
-            @Override public void onDragStart(View anchor, AppEntry app) { beginDrag(anchor, app.key(), true); }
+            @Override public void onDragStart(View anchor, AppEntry app) { beginDrag(anchor, app.key(), null); }
             @Override public void onHiddenApps() { showHiddenSheet(); }
         });
         grid.setAdapter(adapter);
@@ -486,13 +505,13 @@ public class MainActivity extends Activity {
         for (FrameLayout[] row : h.cells) {
             for (FrameLayout cell : row) cell.removeAllViews();
         }
-        for (Map.Entry<String, HomeStore.Placement> en : homeStore.snapshot().entrySet()) {
-            HomeStore.Placement p = en.getValue();
-            if (p.dock || p.page != pageId) continue;
-            AppEntry app = allApps.get(en.getKey());
-            if (app == null) continue; // desinstalada o aún cargando: no se dibuja, sin errores
-            FrameLayout cell = h.cells[p.row][p.col];
-            cell.addView(makeHomeItem(app, cell));
+        // Se recorre la lista de instancias y se dibuja cada una en su posición.
+        for (HomeStore.Instance inst : homeStore.snapshot()) {
+            if (inst.dock || inst.page != pageId) continue;
+            AppEntry app = allApps.get(inst.key);
+            if (app == null) continue; // desinstalada o aún cargando: se salta, sin errores
+            FrameLayout cell = h.cells[inst.row][inst.col];
+            cell.addView(makeHomeItem(inst, app, cell));
         }
     }
 
@@ -502,12 +521,11 @@ public class MainActivity extends Activity {
         for (FrameLayout slot : dockSlots) slot.removeAllViews();
 
         int shown = 0;
-        for (Map.Entry<String, HomeStore.Placement> en : homeStore.snapshot().entrySet()) {
-            AppEntry app = allApps.get(en.getKey());
+        for (HomeStore.Instance inst : homeStore.snapshot()) {
+            AppEntry app = allApps.get(inst.key);
             if (app == null) continue;
-            HomeStore.Placement p = en.getValue();
-            if (p.dock) {
-                dockSlots[p.col].addView(makeDockItem(app));
+            if (inst.dock) {
+                dockSlots[inst.col].addView(makeDockItem(inst, app));
             } else {
                 shown++;
             }
@@ -561,7 +579,7 @@ public class MainActivity extends Activity {
         return vh instanceof PageVH ? (PageVH) vh : null;
     }
 
-    private View makeHomeItem(AppEntry app, FrameLayout cell) {
+    private View makeHomeItem(HomeStore.Instance inst, AppEntry app, FrameLayout cell) {
         View item = getLayoutInflater().inflate(R.layout.item_app, cell, false);
         ((FrameLayout.LayoutParams) item.getLayoutParams()).gravity = Gravity.CENTER;
         ImageView icon = item.findViewById(R.id.icon);
@@ -569,32 +587,43 @@ public class MainActivity extends Activity {
         icon.setImageDrawable(app.newIcon(getResources()));
         label.setText(app.label());
         label.setShadowLayer(dp(3), 0, dp(1), 0xCC000000); // legible sobre cualquier fondo
-        item.setTag(app);
-        item.setOnClickListener(v -> openApp(app));
+        item.setTag(new Placed(app, inst.id));              // esta INSTANCIA, no solo la app
+        item.setOnClickListener(v -> openApp(app));         // todas las instancias abren la misma app
         placedDrag.attach(item);
         return item;
     }
 
-    private View makeDockItem(AppEntry app) {
+    private View makeDockItem(HomeStore.Instance inst, AppEntry app) {
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(app.newIcon(getResources()));
         iv.setBackgroundResource(R.drawable.item_bg);
         iv.setContentDescription(app.label());
         iv.setLayoutParams(new FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER));
-        iv.setTag(app);
+        iv.setTag(new Placed(app, inst.id));
         iv.setOnClickListener(v -> openApp(app));
         placedDrag.attach(iv);
         return iv;
     }
 
-    private void showPlacedMenu(View anchor, AppEntry app) {
-        HomeStore.Placement p = homeStore.get(app.key());
-        boolean inDock = p != null && p.dock;
+    /**
+     * Menú de un ícono de la Home o del dock.
+     * Cambiar ícono / nombre / Restaurar afectan a la APP (todas sus instancias y el cajón).
+     * "Quitar" afecta solo a esta instancia.
+     */
+    private void showPlacedMenu(View anchor, Placed pl) {
+        AppEntry app = pl.app;
+        HomeStore.Instance inst = homeStore.get(pl.instanceId);
+        boolean inDock = inst != null && inst.dock;
         LinearLayout col = newMenuColumn();
         col.addView(menuRow(getString(R.string.abrir), () -> openApp(app)));
         col.addView(menuRow(getString(R.string.info_app), () -> openInfo(app)));
+        col.addView(menuRow(getString(R.string.cambiar_icono), () -> pickIcon(app)));
+        col.addView(menuRow(getString(R.string.cambiar_nombre), () -> showRenameSheet(app)));
+        if (app.hasCustomization()) {
+            col.addView(menuRow(getString(R.string.restaurar), () -> restoreAll(app)));
+        }
         col.addView(menuRow(getString(inDock ? R.string.quitar_dock : R.string.quitar_home), () -> {
-            homeStore.remove(app.key());
+            homeStore.remove(pl.instanceId);
             renderHome();
         }));
         popup(anchor, col);
@@ -649,15 +678,18 @@ public class MainActivity extends Activity {
     //  Arrastrar y soltar (cajón -> Home/dock, y mover dentro de Home/dock)
     // =========================================================================
 
-    private void beginDrag(View v, String key, boolean fromDrawer) {
+    /** instanceId == null: viene del cajón (se creará una instancia nueva). Si no: se mueve esa instancia. */
+    private void beginDrag(View v, String key, String instanceId) {
         dismissMenu();
         ClipData clip = ClipData.newPlainText("app", key);
-        boolean started = v.startDragAndDrop(clip, new View.DragShadowBuilder(v), new DragPayload(key), 0);
+        boolean started = v.startDragAndDrop(clip, new View.DragShadowBuilder(v),
+                new DragPayload(key, instanceId), 0);
         if (!started) return;
-        if (fromDrawer) {
-            closeDrawer(true, true); // el cajón baja para dejar ver la Home
+        if (instanceId == null) {
+            closeDrawer(true, true);                 // el cajón baja para dejar ver la Home
         } else {
-            v.setAlpha(0.35f);       // el ícono "levantado"
+            v.setAlpha(0.35f);                       // el ícono "levantado"
+            homeTrash.setVisibility(View.VISIBLE);   // se puede soltar en la papelera para quitarlo
         }
     }
 
@@ -671,8 +703,14 @@ public class MainActivity extends Activity {
                 return true;
             case DragEvent.ACTION_DRAG_ENTERED:
             case DragEvent.ACTION_DRAG_LOCATION: {
-                Target t = targetAt(e.getX(), e.getY());
-                setHot(t != null ? t.view : null);
+                View over = null;
+                if (overTrash(e.getX(), e.getY(), payload)) {
+                    over = homeTrash;
+                } else {
+                    Target t = targetAt(e.getX(), e.getY());
+                    if (t != null) over = t.view;
+                }
+                setHot(over);
                 // junto al borde: pasa a la página vecina para poder soltar allí
                 setEdgeDir(e.getX() < dp(48) ? -1 : (e.getX() > v.getWidth() - dp(48) ? 1 : 0));
                 return true;
@@ -682,22 +720,38 @@ public class MainActivity extends Activity {
                 setEdgeDir(0);
                 return true;
             case DragEvent.ACTION_DROP: {
-                Target t = targetAt(e.getX(), e.getY());
+                boolean onTrash = overTrash(e.getX(), e.getY(), payload);
+                Target t = onTrash ? null : targetAt(e.getX(), e.getY());
                 setHot(null);
                 setEdgeDir(0);
+                if (onTrash) {
+                    homeStore.remove(payload.instanceId); // quita solo esta instancia
+                    return true;
+                }
                 if (t == null) return false; // soltado fuera de la cuadrícula y del dock: no pasa nada
-                int res = homeStore.drop(payload.key, t.dock, t.page, t.row, t.col);
+                int res = (payload.instanceId == null)
+                        // desde el cajón: instancia NUEVA (aunque la app ya esté en la Home)
+                        ? homeStore.addNew(payload.key, t.dock, t.page, t.row, t.col)
+                        // ya colocada: se MUEVE (no se crea otra)
+                        : homeStore.move(payload.instanceId, t.dock, t.page, t.row, t.col);
                 if (res == HomeStore.FULL) toast(t.dock ? R.string.dock_lleno : R.string.home_llena);
                 return true;
             }
             case DragEvent.ACTION_DRAG_ENDED:
                 setHot(null);
                 setEdgeDir(0);
+                homeTrash.setVisibility(View.INVISIBLE);
                 ui.post(this::renderHome); // también restaura el ícono "levantado" si no se movió
                 return true;
             default:
                 return false;
         }
+    }
+
+    private boolean overTrash(float x, float y, DragPayload p) {
+        if (p.instanceId == null || homeTrash.getVisibility() != View.VISIBLE) return false;
+        return x >= homeTrash.getLeft() - dp(20) && x <= homeTrash.getRight() + dp(20)
+                && y >= homeTrash.getTop() - dp(20) && y <= homeTrash.getBottom() + dp(20);
     }
 
     private void setEdgeDir(int dir) {
@@ -869,13 +923,12 @@ public class MainActivity extends Activity {
     private void fillThumb(PageThumb thumb, int pageId) {
         List<Drawable> icons = new ArrayList<>();
         List<int[]> cells = new ArrayList<>();
-        for (Map.Entry<String, HomeStore.Placement> en : homeStore.snapshot().entrySet()) {
-            HomeStore.Placement p = en.getValue();
-            if (p.dock || p.page != pageId) continue;
-            AppEntry app = allApps.get(en.getKey());
+        for (HomeStore.Instance inst : homeStore.snapshot()) {
+            if (inst.dock || inst.page != pageId) continue;
+            AppEntry app = allApps.get(inst.key);
             if (app == null) continue;
             icons.add(app.newIcon(getResources()));
-            cells.add(new int[]{p.row, p.col});
+            cells.add(new int[]{inst.row, inst.col});
         }
         thumb.setItems(icons, cells);
     }
