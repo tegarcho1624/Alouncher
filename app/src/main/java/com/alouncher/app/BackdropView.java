@@ -105,6 +105,10 @@ public class BackdropView extends FrameLayout {
         video.setPlaying(play);
     }
 
+    boolean hasVideo() {
+        return hasVideo;
+    }
+
     boolean hasMedia() {
         return hasImage || hasVideo;
     }

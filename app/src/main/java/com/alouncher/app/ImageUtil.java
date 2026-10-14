@@ -135,4 +135,17 @@ final class ImageUtil {
             });
         });
     }
+
+    /** Carátula incrustada en un audio, recortada a cuadrado. Null si los datos no son una imagen. */
+    static Bitmap coverThumb(byte[] data, int px) {
+        try {
+            Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
+            if (b == null) return null;
+            int side = Math.min(b.getWidth(), b.getHeight());
+            Bitmap sq = Bitmap.createBitmap(b, (b.getWidth() - side) / 2, (b.getHeight() - side) / 2, side, side);
+            return Bitmap.createScaledBitmap(sq, px, px, true);
+        } catch (Exception | OutOfMemoryError e) {
+            return null;
+        }
+    }
 }

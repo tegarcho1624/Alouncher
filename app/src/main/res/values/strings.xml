@@ -122,4 +122,37 @@
         <item quantity="other">%d videos añadidos</item>
     </plurals>
     <string name="sin_animado_corto">Sin fondo animado</string>
+
+    <string name="audio_de">Audio · %1$s</string>
+    <string name="vacio_audios">Aún no hay audios. Añade uno del dispositivo.</string>
+    <string name="anadir_audio">Añadir audio del dispositivo</string>
+    <string name="quitar_audio">Quitar audio</string>
+    <string name="sin_audio">Sin audio</string>
+    <string name="audio_quitado">Audio quitado</string>
+    <string name="audio_no_leido">No se pudo leer ese audio</string>
+    <string name="audio_error">No se pudo reproducir ese audio</string>
+    <string name="silencia_video">Silencia el video de fondo para escuchar la música</string>
+    <string name="audio_reproduciendo">Reproduciendo en la Home · %1$s</string>
+    <string name="audio_en_pausa">En pausa · %1$s</string>
+    <string name="audio_bloqueado">En pausa (el video suena) · %1$s</string>
+    <string name="ninguno_audio">Ningún audio activo</string>
+    <string name="ayuda_bucle_audio">Bucle repite solo el audio actual. Repetir vuelve a empezar la lista al terminar el último.</string>
+    <string name="ayuda_audio_home">El audio solo suena en la Home: se pausa al salir de ella y continúa donde quedó al volver.</string>
+    <string name="hint_audio_bloqueado">El fondo animado de la Home suena: el audio se detiene mientras tanto. Silencia el video para escucharlo.</string>
+    <string name="hint_video_suena">Mientras el video suene, la música de fondo se detiene.</string>
+    <string name="hint_video_silencio">Con el video en silencio puedes activar la música de fondo.</string>
+    <string name="silenciar">Silenciar</string>
+    <string name="activar_sonido">Activar sonido</string>
+    <string name="volumen">Volumen</string>
+    <string name="audio_pausa_video_corto"> · En pausa: el fondo animado suena</string>
+    <string name="reproducir">Reproducir</string>
+    <string name="pausar">Pausar</string>
+    <plurals name="audios">
+        <item quantity="one">%d audio</item>
+        <item quantity="other">%d audios</item>
+    </plurals>
+    <plurals name="audios_anadidos">
+        <item quantity="one">%d audio añadido</item>
+        <item quantity="other">%d audios añadidos</item>
+    </plurals>
 </resources>

@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.provider.OpenableColumns;
 
@@ -44,11 +45,17 @@ final class BackgroundStore {
         final String id;
         final String file;  // nombre del archivo copiado dentro de files/backgrounds/<tipo>/
         final String name;  // nombre mostrado: el del archivo original SIN extensión
+        final String artist; // solo audio, si el archivo lo trae en sus metadatos ("" si no)
 
         Item(String id, String file, String name) {
+            this(id, file, name, "");
+        }
+
+        Item(String id, String file, String name, String artist) {
             this.id = id;
             this.file = file;
             this.name = name;
+            this.artist = artist != null ? artist : "";
         }
 
         String ext() {
@@ -67,6 +74,8 @@ final class BackgroundStore {
         boolean loop;                    // repetir solo el recurso actual
         boolean mute;
         int volume = 100;
+        boolean off;                     // audio: pausado A MANO (no se reanuda solo hasta pulsar ▶)
+        int pos;                         // audio: posición (ms) donde quedó al salir de la Home
 
         int indexOf(String id) {
             for (int i = 0; i < items.size(); i++) {
@@ -114,7 +123,8 @@ final class BackgroundStore {
             if (a != null) {
                 for (int i = 0; i < a.length(); i++) {
                     JSONObject it = a.getJSONObject(i);
-                    p.items.add(new Item(it.getString("i"), it.getString("f"), it.optString("n", "")));
+                    p.items.add(new Item(it.getString("i"), it.getString("f"), it.optString("n", ""),
+                            it.optString("a", "")));
                 }
             }
             p.cur = o.optString("cur", "");
@@ -124,6 +134,8 @@ final class BackgroundStore {
             p.loop = o.optBoolean("loop", p.loop);
             p.mute = o.optBoolean("mute", p.mute);
             p.volume = o.optInt("vol", 100);
+            p.off = o.optBoolean("off", false);
+            p.pos = o.optInt("pos", 0);
         } catch (JSONException e) {
             return fresh(type);
         }
@@ -151,6 +163,7 @@ final class BackgroundStore {
                 j.put("i", it.id);
                 j.put("f", it.file);
                 j.put("n", it.name);
+                if (!it.artist.isEmpty()) j.put("a", it.artist);
                 a.put(j);
             }
             o.put("items", a);
@@ -161,9 +174,17 @@ final class BackgroundStore {
             o.put("loop", p.loop);
             o.put("mute", p.mute);
             o.put("vol", p.volume);
+            o.put("off", p.off);
+            o.put("pos", p.pos);
             prefs(c).edit().putString(key(scope, type), o.toString()).apply();
         } catch (JSONException ignored) {
         }
+    }
+
+    /** ¿El fondo animado de la Home suena? = hay uno activo, no está silenciado y su volumen es mayor que 0. */
+    static boolean homeVideoSounds(Context c) {
+        Playlist p = load(c, HOME, VIDEO);
+        return p.current() != null && !p.mute && p.volume > 0;
     }
 
     // ---- Archivos --------------------------------------------------------------
@@ -176,15 +197,25 @@ final class BackgroundStore {
         return new File(dir(c, type), it.file);
     }
 
+    /** Miniatura de un video (un cuadro cerca del inicio). */
     static File thumbFile(Context c, Item it) {
-        return new File(new File(dir(c, VIDEO), "thumbs"), it.id + ".jpg");
+        return thumbFileById(c, VIDEO, it.id);
+    }
+
+    /** Miniatura de un recurso: cuadro del video o carátula del audio. */
+    static File thumbFile(Context c, String type, Item it) {
+        return thumbFileById(c, type, it.id);
+    }
+
+    private static File thumbFileById(Context c, String type, String id) {
+        return new File(new File(dir(c, type), "thumbs"), id + ".jpg");
     }
 
     static void deleteFile(Context c, String type, Item it) {
         File f = fileOf(c, type, it);
         if (f.exists()) f.delete();
-        if (VIDEO.equals(type)) {
-            File t = thumbFile(c, it);
+        if (VIDEO.equals(type) || AUDIO.equals(type)) {
+            File t = thumbFile(c, type, it);
             if (t.exists()) t.delete();
         }
     }
@@ -246,7 +277,37 @@ final class BackgroundStore {
                 return null;
             }
         }
-        Item item = new Item(id, stored, baseName(display));
+        String artist = "";
+        if (AUDIO.equals(type)) {
+            // Comprueba que sea un audio legible; toma artista y carátula si el archivo los trae
+            MediaMetadataRetriever r = new MediaMetadataRetriever();
+            try {
+                r.setDataSource(dest.getAbsolutePath());
+                if (!"yes".equals(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO))) {
+                    dest.delete();
+                    return null;
+                }
+                String a = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
+                if (a == null || a.trim().isEmpty()) {
+                    a = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST);
+                }
+                if (a != null) artist = a.trim();
+                byte[] pic = r.getEmbeddedPicture();
+                if (pic != null) {
+                    android.graphics.Bitmap cover = ImageUtil.coverThumb(pic, 192);
+                    if (cover != null) ImageUtil.saveJpeg(cover, thumbFileById(c, AUDIO, id));
+                }
+            } catch (Exception e) {
+                dest.delete();
+                return null;
+            } finally {
+                try {
+                    r.release();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        Item item = new Item(id, stored, baseName(display), artist);
         if (VIDEO.equals(type)) {
             // Comprueba que sea un video legible y deja lista su miniatura (un cuadro cerca del inicio)
             android.graphics.Bitmap frame = ImageUtil.videoFrame(dest, 192);

@@ -123,6 +123,18 @@ public class MainActivity extends Activity {
     private final ExecutorService bgIo = Executors.newSingleThreadExecutor();
     private int bgApplied = -1;          // versión de los fondos que ya está aplicada
     private boolean resumed;             // la Activity está a la vista (los videos solo corren entonces)
+    private boolean windowFocused;       // sin menús, diálogos ni paneles encima
+    private boolean bgReady;             // ya se aplicaron los fondos al menos una vez
+    private AudioPlayer audio;           // audio de la Home
+    private BackgroundStore.Playlist audioPl;
+    private boolean audioPlaying;
+    private boolean audioEnded;          // la lista llegó al final sin Repetir: queda detenida
+    private int audioFails;
+    private final AudioPlayer.Host audioHost = new AudioPlayer.Host() {
+        @Override public void onPrepared() { audioFails = 0; }
+        @Override public void onEnded() { onAudioEnded(); }
+        @Override public void onError() { onAudioError(); }
+    };
     private final VideoLayer.Listener homeVideoListener = new VideoLayer.Listener() {
         @Override public void onEnded() { onVideoEnded(BackgroundStore.HOME); }
         @Override public void onError() { onVideoError(BackgroundStore.HOME); }
@@ -285,6 +297,7 @@ public class MainActivity extends Activity {
         FontManager.apply(getWindow().getDecorView()); // textos fijos (cajón, modo edición, mensaje)
         fontApplied = FontManager.version();
 
+        audio = new AudioPlayer(audioHost);
         applyBackgrounds();
         reload();
     }
@@ -306,8 +319,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
-        syncVideoPlayback();
+        // Primero se vuelven a leer listas y ajustes (video y audio) y DESPUÉS se reanuda nada
         if (bgApplied != BackgroundStore.version()) applyBackgrounds();
+        syncVideoPlayback();
         if (fontApplied != FontManager.version()) {
             fontApplied = FontManager.version();
             FontManager.apply(getWindow().getDecorView());
@@ -358,6 +372,7 @@ public class MainActivity extends Activity {
         bgIo.shutdownNow();
         homeBackdrop.clearVideo();
         drawerBackdrop.clearVideo();
+        if (audio != null) audio.release();
         super.onDestroy();
     }
 
@@ -432,6 +447,7 @@ public class MainActivity extends Activity {
     private void applyBackgrounds() {
         if (bgIo.isShutdown()) return;
         bgApplied = BackgroundStore.version();
+        applyAudio();
         final int w = getResources().getDisplayMetrics().widthPixels;
         final int h = getResources().getDisplayMetrics().heightPixels;
         final Context app = getApplicationContext();
@@ -459,6 +475,7 @@ public class MainActivity extends Activity {
                 showVideoFor(BackgroundStore.HOME, hv, hvp);
                 showVideoFor(BackgroundStore.DRAWER, dv, dvp);
                 updateBars();
+                bgReady = true;
                 syncVideoPlayback();
             });
         });
@@ -497,6 +514,7 @@ public class MainActivity extends Activity {
     private void syncVideoPlayback() {
         homeBackdrop.setVideoPlaying(resumed && !drawerOpen);
         drawerBackdrop.setVideoPlaying(resumed && drawerOpen);
+        syncAudio();
     }
 
     /** Terminó un video (solo ocurre sin Bucle): pasa al siguiente de la lista según Aleatorio / Repetir. */
@@ -526,6 +544,134 @@ public class MainActivity extends Activity {
         BackdropView b = BackgroundStore.HOME.equals(scope) ? homeBackdrop : drawerBackdrop;
         b.clearVideo();
         updateBars();
+        syncAudio(); // si el video fallaba con sonido, el audio puede retomar (si no estaba pausado a mano)
+    }
+
+    // =========================================================================
+    //  Audio de la Home y su coexistencia con el fondo animado (reglas de Voltea)
+    //
+    //  El audio suena SOLO si: está en la Home (a la vista, con foco, sin menús ni cajón ni modo
+    //  edición encima) · hay un audio activo · no está pausado a mano · NO suena el fondo animado.
+    //  Todo se decide desde syncAudio(), a partir del estado guardado, y se vuelve a evaluar cada vez que
+    //  algo cambia (foco, cajón, edición, videos, listas).
+    // =========================================================================
+
+    /** "Estar en la Home": a la vista y con el foco, sin cajón ni modo edición. Un menú o diálogo quita el foco. */
+    private boolean homeActive() {
+        return resumed && windowFocused && !drawerOpen && !editMode;
+    }
+
+    /**
+     * vidSnd() de Voltea: hay fondo animado activo en la Home, NO está silenciado y su volumen es > 0.
+     * Solo entonces "el video suena". Si el video falló o se quitó, ya no cuenta.
+     */
+    private boolean videoSounds() {
+        BackgroundStore.Playlist p = BackgroundStore.load(this, BackgroundStore.HOME, BackgroundStore.VIDEO);
+        if (p.mute || p.volume <= 0) return false;
+        return bgReady ? homeBackdrop.hasVideo() : p.current() != null;
+    }
+
+    private String audioKey() {
+        return BackgroundStore.HOME + ":" + BackgroundStore.AUDIO;
+    }
+
+    /** Vuelve a leer la lista de audio y su ajuste. Si el archivo actual ya no existe, salta al siguiente que exista. */
+    private void applyAudio() {
+        if (audio == null) return;
+        BackgroundStore.Playlist before = BackgroundStore.load(this, BackgroundStore.HOME, BackgroundStore.AUDIO);
+        File f = BackgroundStore.resolveCurrent(this, BackgroundStore.HOME, BackgroundStore.AUDIO);
+        BackgroundStore.Playlist p = BackgroundStore.load(this, BackgroundStore.HOME, BackgroundStore.AUDIO);
+        if (!before.cur.equals(p.cur)) p.pos = 0; // saltó a otro archivo: empieza desde el principio
+        audioPl = p;
+        if (f != null) {
+            audio.setSource(f, p.loop, p.volume / 100f, p.pos);
+        } else {
+            audio.clear(); // sin audio (o ninguno existe): nada que reproducir, sin errores
+        }
+        audioEnded = false;
+        audioFails = 0;
+        syncAudio();
+    }
+
+    /** Decide si el audio suena o está en pausa. Se guarda dónde quedó al dejar de sonar. */
+    private void syncAudio() {
+        if (audio == null) return;
+        boolean play = audioPl != null
+                && audioPl.current() != null
+                && !audioPl.off        // pausado a mano: no se reanuda solo
+                && !audioEnded
+                && homeActive()        // solo en la Home
+                && !videoSounds();     // nunca mientras el fondo animado suene
+        audio.setPlaying(play);
+        if (audioPlaying && !play) persistAudioPos();
+        audioPlaying = play;
+    }
+
+    private void persistAudioPos() {
+        if (audioPl == null || !audio.hasSource()) return;
+        audioPl.pos = audio.position();
+        BackgroundStore.saveNoBump(this, BackgroundStore.HOME, BackgroundStore.AUDIO, audioPl);
+    }
+
+    /** Terminó un audio (solo ocurre sin Bucle): pasa al siguiente según Aleatorio / Repetir; si no hay, la lista se detiene. */
+    private void onAudioEnded() {
+        if (audioPl == null) return;
+        BackgroundStore.Item n = PlaylistNav.next(audioKey(), audioPl, true);
+        if (n == null) {
+            audioEnded = true;
+            audioPl.pos = 0;
+            BackgroundStore.saveNoBump(this, BackgroundStore.HOME, BackgroundStore.AUDIO, audioPl);
+            syncAudio();
+            return;
+        }
+        boolean same = n.id.equals(audioPl.cur);
+        audioPl.cur = n.id;
+        audioPl.pos = 0;
+        BackgroundStore.saveNoBump(this, BackgroundStore.HOME, BackgroundStore.AUDIO, audioPl);
+        if (same) {
+            audio.restart(); // lista de un solo audio con Repetir
+            return;
+        }
+        playCurrentAudio();
+    }
+
+    /** Si un audio falla: aviso y salta al siguiente (como máximo una vuelta completa por la lista). */
+    private void onAudioError() {
+        Toast.makeText(this, R.string.audio_error, Toast.LENGTH_SHORT).show();
+        if (audioPl == null || audioPl.items.isEmpty()) return;
+        audioFails++;
+        if (audioFails > audioPl.items.size()) {
+            audioEnded = true;
+            return;
+        }
+        BackgroundStore.Item n = PlaylistNav.next(audioKey(), audioPl, false);
+        if (n == null || n.id.equals(audioPl.cur)) {
+            audioEnded = true;
+            return;
+        }
+        audioPl.cur = n.id;
+        audioPl.pos = 0;
+        BackgroundStore.saveNoBump(this, BackgroundStore.HOME, BackgroundStore.AUDIO, audioPl);
+        playCurrentAudio();
+    }
+
+    private void playCurrentAudio() {
+        BackgroundStore.Item cur = audioPl.current();
+        File f = cur != null ? BackgroundStore.fileOf(this, BackgroundStore.AUDIO, cur) : null;
+        if (f == null || !f.isFile()) {
+            applyAudio(); // ese ya no existe: se vuelve a resolver y salta al siguiente que exista
+            return;
+        }
+        audio.setSource(f, audioPl.loop, audioPl.volume / 100f, 0);
+        syncAudio();
+    }
+
+    /** Un menú, diálogo o panel encima de la Home quita el foco: el audio se pausa; al volver, continúa. */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        windowFocused = hasFocus;
+        syncAudio();
     }
 
     // =========================================================================
@@ -1010,6 +1156,7 @@ public class MainActivity extends Activity {
     private void enterEditMode() {
         if (editMode || drawerOpen) return;
         editMode = true;
+        syncAudio(); // un menú sobre la Home: el audio se pausa
         dismissMenu();
         dismissSheet();
 
@@ -1037,6 +1184,7 @@ public class MainActivity extends Activity {
     private void exitEditMode(boolean animate) {
         if (!editMode) return;
         editMode = false;
+        syncAudio();
         setEditEdge(0);
         setEditHot(null);
         homeLayer.animate().cancel();

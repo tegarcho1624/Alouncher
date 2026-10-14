@@ -125,9 +125,24 @@ public class BackgroundsActivity extends Activity {
 
         // Siguiente sub-fase: se muestra ya, pero todavía no abre nada
 
+        // El audio solo existe en la Home: en App Drawer la fila no aparece
         if (BackgroundStore.HOME.equals(scope)) {
-            rows.addView(row(getString(R.string.fila_audio), getString(R.string.proximamente), false,
-                    v -> Toast.makeText(this, R.string.proximamente, Toast.LENGTH_SHORT).show()));
+            BackgroundStore.Playlist au = BackgroundStore.load(this, BackgroundStore.HOME, BackgroundStore.AUDIO);
+            BackgroundStore.Item acur = au.current();
+            String auSub = acur != null ? acur.name : getString(R.string.sin_audio);
+            if (!au.items.isEmpty()) {
+                auSub += " · " + getResources().getQuantityString(R.plurals.audios,
+                        au.items.size(), au.items.size());
+            }
+            if (acur != null && !au.off && BackgroundStore.homeVideoSounds(this)) {
+                auSub += getString(R.string.audio_pausa_video_corto); // el fondo animado suena
+            }
+            rows.addView(row(getString(R.string.fila_audio), auSub, true, v -> {
+                Intent i = new Intent(this, PlaylistActivity.class);
+                i.putExtra(PlaylistActivity.EXTRA_SCOPE, BackgroundStore.HOME);
+                i.putExtra(PlaylistActivity.EXTRA_TYPE, BackgroundStore.AUDIO);
+                startActivity(i);
+            }));
         }
         FontManager.apply(root);
     }
