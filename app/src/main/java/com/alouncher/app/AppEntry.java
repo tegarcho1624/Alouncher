@@ -4,6 +4,9 @@ import android.content.ComponentName;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 
+import androidx.core.graphics.drawable.RoundedBitmapDrawable;
+import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
+
 /** Una app lanzable con sus datos originales y su personalización aplicada. */
 final class AppEntry {
     final String packageName;
@@ -53,6 +56,17 @@ final class AppEntry {
      */
     Drawable newIcon(Resources res) {
         Drawable d = icon();
+        // El ícono personalizado es un RoundedBitmapDrawable y ese tipo NO tiene ConstantState: devolverlo tal
+        // cual compartía UNA sola instancia entre la Home y las miniaturas del modo edición, que le cambian los
+        // límites (setBounds) y dejaban el ícono de la Home mal dibujado al volver. Se crea una copia propia
+        // (mismo bitmap, misma forma) para cada vista.
+        if (d instanceof RoundedBitmapDrawable) {
+            RoundedBitmapDrawable src = (RoundedBitmapDrawable) d;
+            RoundedBitmapDrawable copy = RoundedBitmapDrawableFactory.create(res, src.getBitmap());
+            copy.setAntiAlias(src.hasAntiAlias());
+            copy.setCornerRadius(src.getCornerRadius());
+            return copy;
+        }
         Drawable.ConstantState cs = d.getConstantState();
         return cs != null ? cs.newDrawable(res).mutate() : d;
     }
