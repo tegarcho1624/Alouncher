@@ -4,10 +4,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.media.ExifInterface;
+import android.media.MediaMetadataRetriever;
 import android.util.LruCache;
 import android.widget.ImageView;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -74,6 +76,62 @@ final class ImageUtil {
             if (bm != null) THUMBS.put(key, bm);
             iv.post(() -> {
                 if (bm != null && key.equals(iv.getTag())) iv.setImageBitmap(bm);
+            });
+        });
+    }
+
+    /** Un cuadro cerca del inicio (≤ 1 s) recortado a cuadrado, como las miniaturas de Voltea. Null si no es un video válido. */
+    static Bitmap videoFrame(File video, int px) {
+        MediaMetadataRetriever r = new MediaMetadataRetriever();
+        try {
+            r.setDataSource(video.getAbsolutePath());
+            Bitmap f = r.getFrameAtTime(500_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            if (f == null) f = r.getFrameAtTime(0L);
+            if (f == null) return null;
+            int side = Math.min(f.getWidth(), f.getHeight());
+            Bitmap sq = Bitmap.createBitmap(f, (f.getWidth() - side) / 2, (f.getHeight() - side) / 2, side, side);
+            return Bitmap.createScaledBitmap(sq, px, px, true);
+        } catch (Exception | OutOfMemoryError e) {
+            return null;
+        } finally {
+            try {
+                r.release();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    static void saveJpeg(Bitmap bmp, File dest) {
+        try {
+            File dir = dest.getParentFile();
+            if (dir != null && !dir.isDirectory()) dir.mkdirs();
+            try (FileOutputStream out = new FileOutputStream(dest)) {
+                bmp.compress(Bitmap.CompressFormat.JPEG, 80, out);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Miniatura de un video: usa la guardada; si falta, la genera una vez y la guarda. */
+    static void loadVideoThumb(File video, File thumb, ImageView iv, int px) {
+        final String key = video.getAbsolutePath() + "@v" + px;
+        iv.setTag(key);
+        Bitmap cached = THUMBS.get(key);
+        if (cached != null) {
+            iv.setImageBitmap(cached);
+            return;
+        }
+        iv.setImageDrawable(null);
+        THUMB_POOL.execute(() -> {
+            Bitmap bm = thumb.isFile() ? decodeSampled(thumb, px, px) : null;
+            if (bm == null) {
+                bm = videoFrame(video, 192);
+                if (bm != null) saveJpeg(bm, thumb);
+            }
+            final Bitmap result = bm;
+            if (result != null) THUMBS.put(key, result);
+            iv.post(() -> {
+                if (result != null && key.equals(iv.getTag())) iv.setImageBitmap(result);
             });
         });
     }

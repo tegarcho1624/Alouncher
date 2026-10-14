@@ -44,6 +44,13 @@ final class UiKit {
         return box;
     }
 
+    /** Botón alternable: encendido = dorado (borde dorado + texto claro + relleno tenue); apagado = apagado. */
+    static void styleToggle(TextView t, boolean on) {
+        t.setBackgroundResource(on ? R.drawable.seg_on : R.drawable.seg_off);
+        t.setTextColor(t.getContext().getColor(on ? R.color.gold_hi : R.color.mut));
+        t.setSelected(on);
+    }
+
     static void select(LinearLayout box, int selected) {
         for (int i = 0; i < box.getChildCount(); i++) {
             TextView t = (TextView) box.getChildAt(i);

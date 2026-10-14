@@ -96,8 +96,16 @@ final class BackgroundStore {
         return scope + ":" + type;
     }
 
-    static Playlist load(Context c, String scope, String type) {
+    private static Playlist fresh(String type) {
         Playlist p = new Playlist();
+        boolean video = VIDEO.equals(type);
+        p.loop = video;   // un fondo animado se repite solo
+        p.mute = video;   // y va silenciado
+        return p;
+    }
+
+    static Playlist load(Context c, String scope, String type) {
+        Playlist p = fresh(type);
         String raw = prefs(c).getString(key(scope, type), null);
         if (raw == null) return p;
         try {
@@ -113,11 +121,11 @@ final class BackgroundStore {
             p.mode = o.optString("mode", MODE_FILL);
             p.shuffle = o.optBoolean("shuf", false);
             p.repeat = o.optBoolean("rep", false);
-            p.loop = o.optBoolean("loop", false);
-            p.mute = o.optBoolean("mute", false);
+            p.loop = o.optBoolean("loop", p.loop);
+            p.mute = o.optBoolean("mute", p.mute);
             p.volume = o.optInt("vol", 100);
         } catch (JSONException e) {
-            return new Playlist();
+            return fresh(type);
         }
         return p;
     }
@@ -127,6 +135,11 @@ final class BackgroundStore {
         synchronized (BackgroundStore.class) {
             version++;
         }
+    }
+
+    /** Guarda sin subir la versión: para cambios que hace el propio reproductor (p. ej. pasar al siguiente video). */
+    static void saveNoBump(Context c, String scope, String type, Playlist p) {
+        saveQuiet(c, scope, type, p);
     }
 
     private static void saveQuiet(Context c, String scope, String type, Playlist p) {
@@ -163,9 +176,17 @@ final class BackgroundStore {
         return new File(dir(c, type), it.file);
     }
 
+    static File thumbFile(Context c, Item it) {
+        return new File(new File(dir(c, VIDEO), "thumbs"), it.id + ".jpg");
+    }
+
     static void deleteFile(Context c, String type, Item it) {
         File f = fileOf(c, type, it);
         if (f.exists()) f.delete();
+        if (VIDEO.equals(type)) {
+            File t = thumbFile(c, it);
+            if (t.exists()) t.delete();
+        }
     }
 
     /**
@@ -225,7 +246,17 @@ final class BackgroundStore {
                 return null;
             }
         }
-        return new Item(id, stored, baseName(display));
+        Item item = new Item(id, stored, baseName(display));
+        if (VIDEO.equals(type)) {
+            // Comprueba que sea un video legible y deja lista su miniatura (un cuadro cerca del inicio)
+            android.graphics.Bitmap frame = ImageUtil.videoFrame(dest, 192);
+            if (frame == null) {
+                dest.delete();
+                return null;
+            }
+            ImageUtil.saveJpeg(frame, thumbFile(c, item));
+        }
+        return item;
     }
 
     private static String queryName(Context c, Uri uri) {

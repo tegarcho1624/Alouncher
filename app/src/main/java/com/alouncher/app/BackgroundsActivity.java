@@ -109,9 +109,21 @@ public class BackgroundsActivity extends Activity {
             startActivity(i);
         }));
 
-        // Siguientes sub-fases: se muestran ya, pero todavía no abren nada
-        rows.addView(row(getString(R.string.fila_fondo_animado), getString(R.string.proximamente), false,
-                v -> Toast.makeText(this, R.string.proximamente, Toast.LENGTH_SHORT).show()));
+        BackgroundStore.Playlist vid = BackgroundStore.load(this, scope, BackgroundStore.VIDEO);
+        BackgroundStore.Item vcur = vid.current();
+        String vidSub = vcur != null ? vcur.name : getString(R.string.sin_animado_corto);
+        if (!vid.items.isEmpty()) {
+            vidSub += " · " + getResources().getQuantityString(R.plurals.videos,
+                    vid.items.size(), vid.items.size());
+        }
+        rows.addView(row(getString(R.string.fila_fondo_animado), vidSub, true, v -> {
+            Intent i = new Intent(this, PlaylistActivity.class);
+            i.putExtra(PlaylistActivity.EXTRA_SCOPE, scope);
+            i.putExtra(PlaylistActivity.EXTRA_TYPE, BackgroundStore.VIDEO);
+            startActivity(i);
+        }));
+
+        // Siguiente sub-fase: se muestra ya, pero todavía no abre nada
 
         if (BackgroundStore.HOME.equals(scope)) {
             rows.addView(row(getString(R.string.fila_audio), getString(R.string.proximamente), false,

@@ -96,4 +96,30 @@
         <item quantity="one">%d imagen añadida</item>
         <item quantity="other">%d imágenes añadidas</item>
     </plurals>
+
+    <string name="fondo_animado_de">Fondo animado · %1$s</string>
+    <string name="vacio_videos">Aún no hay videos. Añade uno del dispositivo.</string>
+    <string name="anadir_video">Añadir video del dispositivo</string>
+    <string name="quitar_fondo_animado">Quitar fondo animado</string>
+    <string name="sin_animado">Sin fondo animado: se ve el fondo estático o el predeterminado</string>
+    <string name="aleatorio">Aleatorio</string>
+    <string name="repetir">Repetir</string>
+    <string name="bucle">Bucle</string>
+    <string name="ayuda_bucle">Bucle repite solo el video actual. Repetir vuelve a empezar la lista al terminar el último.</string>
+    <string name="anterior">Anterior</string>
+    <string name="siguiente">Siguiente</string>
+    <string name="reproduciendo">Reproduciendo: %1$s</string>
+    <string name="ninguno_activo">Ningún video activo</string>
+    <string name="video_no_leido">No se pudo leer ese video</string>
+    <string name="fondo_animado_aplicado">Fondo animado aplicado</string>
+    <string name="fondo_animado_quitado">Fondo animado quitado</string>
+    <plurals name="videos">
+        <item quantity="one">%d video</item>
+        <item quantity="other">%d videos</item>
+    </plurals>
+    <plurals name="videos_anadidos">
+        <item quantity="one">%d video añadido</item>
+        <item quantity="other">%d videos añadidos</item>
+    </plurals>
+    <string name="sin_animado_corto">Sin fondo animado</string>
 </resources>

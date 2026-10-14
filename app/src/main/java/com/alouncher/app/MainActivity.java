@@ -122,6 +122,15 @@ public class MainActivity extends Activity {
     private BackdropView drawerBackdrop; // fondo del cajón
     private final ExecutorService bgIo = Executors.newSingleThreadExecutor();
     private int bgApplied = -1;          // versión de los fondos que ya está aplicada
+    private boolean resumed;             // la Activity está a la vista (los videos solo corren entonces)
+    private final VideoLayer.Listener homeVideoListener = new VideoLayer.Listener() {
+        @Override public void onEnded() { onVideoEnded(BackgroundStore.HOME); }
+        @Override public void onError() { onVideoError(BackgroundStore.HOME); }
+    };
+    private final VideoLayer.Listener drawerVideoListener = new VideoLayer.Listener() {
+        @Override public void onEnded() { onVideoEnded(BackgroundStore.DRAWER); }
+        @Override public void onError() { onVideoError(BackgroundStore.DRAWER); }
+    };
     private boolean pruneOnNextLoad = true;
     private String pendingIconKey; // entrada (paquete/actividad) a la que se le elige ícono
 
@@ -287,8 +296,17 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        resumed = false;
+        syncVideoPlayback(); // al perder el foco los videos se pausan (batería)
+        super.onPause();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
+        syncVideoPlayback();
         if (bgApplied != BackgroundStore.version()) applyBackgrounds();
         if (fontApplied != FontManager.version()) {
             fontApplied = FontManager.version();
@@ -338,6 +356,8 @@ public class MainActivity extends Activity {
         if (pkgReceiver != null) unregisterReceiver(pkgReceiver);
         io.shutdownNow();
         bgIo.shutdownNow();
+        homeBackdrop.clearVideo();
+        drawerBackdrop.clearVideo();
         super.onDestroy();
     }
 
@@ -425,10 +445,21 @@ public class MainActivity extends Activity {
             Bitmap db = df != null ? ImageUtil.decodeSampled(df, w, h) : null;
             String dMode = BackgroundStore.load(app, BackgroundStore.DRAWER, BackgroundStore.IMAGE).mode;
 
+            // Fondos animados (mismo criterio: si el archivo falta, salta al siguiente que exista)
+            File hv = BackgroundStore.resolveCurrent(app, BackgroundStore.HOME, BackgroundStore.VIDEO);
+            BackgroundStore.Playlist hvp = BackgroundStore.load(app, BackgroundStore.HOME, BackgroundStore.VIDEO);
+            File dv = BackgroundStore.resolveCurrent(app, BackgroundStore.DRAWER, BackgroundStore.VIDEO);
+            BackgroundStore.Playlist dvp = BackgroundStore.load(app, BackgroundStore.DRAWER, BackgroundStore.VIDEO);
+
             ui.post(() -> {
                 if (isDestroyed()) return;
                 showHomeBackground(hb, hMode);
                 if (db != null) drawerBackdrop.showImage(db, dMode); else drawerBackdrop.clear();
+                // El animado REEMPLAZA al estático mientras esté activo; el estático sigue guardado
+                showVideoFor(BackgroundStore.HOME, hv, hvp);
+                showVideoFor(BackgroundStore.DRAWER, dv, dvp);
+                updateBars();
+                syncVideoPlayback();
             });
         });
     }
@@ -439,11 +470,62 @@ public class MainActivity extends Activity {
         } else {
             homeBackdrop.clear(); // vuelve el fondo de pantalla del sistema
         }
-        // Con fondo propio, las barras del sistema van en el color base (como en Voltea);
-        // sin él, transparentes para que se vea el fondo del sistema.
-        int bar = bmp != null ? getColor(R.color.bg) : Color.TRANSPARENT;
+    }
+
+    /** Con fondo propio (imagen o video) las barras del sistema van en el color base, como en Voltea; si no, transparentes. */
+    private void updateBars() {
+        int bar = homeBackdrop.hasMedia() ? getColor(R.color.bg) : Color.TRANSPARENT;
         getWindow().setStatusBarColor(bar);
         getWindow().setNavigationBarColor(bar);
+    }
+
+    // ---- Fondo animado -----------------------------------------------------------
+
+    private void showVideoFor(String scope, File f, BackgroundStore.Playlist p) {
+        boolean home = BackgroundStore.HOME.equals(scope);
+        BackdropView b = home ? homeBackdrop : drawerBackdrop;
+        if (f != null) {
+            // Silenciado por defecto y sin controles; en bucle según el ajuste de la lista
+            b.showVideo(f, p.mode, p.loop, p.mute ? 0f : p.volume / 100f,
+                    home ? homeVideoListener : drawerVideoListener);
+        } else {
+            b.clearVideo(); // vuelve a verse el fondo estático (o el predeterminado)
+        }
+    }
+
+    /** Solo corre el video del destino que está a la vista: la Home, o el cajón cuando está abierto. */
+    private void syncVideoPlayback() {
+        homeBackdrop.setVideoPlaying(resumed && !drawerOpen);
+        drawerBackdrop.setVideoPlaying(resumed && drawerOpen);
+    }
+
+    /** Terminó un video (solo ocurre sin Bucle): pasa al siguiente de la lista según Aleatorio / Repetir. */
+    private void onVideoEnded(String scope) {
+        BackgroundStore.Playlist p = BackgroundStore.load(this, scope, BackgroundStore.VIDEO);
+        BackgroundStore.Item n = PlaylistNav.next(scope + ":" + BackgroundStore.VIDEO, p, true);
+        if (n == null) return; // sin Repetir, la lista se detiene en el último
+        boolean same = n.id.equals(p.cur);
+        p.cur = n.id;
+        BackgroundStore.saveNoBump(this, scope, BackgroundStore.VIDEO, p);
+        BackdropView b = BackgroundStore.HOME.equals(scope) ? homeBackdrop : drawerBackdrop;
+        if (same) {
+            b.restartVideo(); // lista de un solo video con Repetir
+            return;
+        }
+        File f = BackgroundStore.fileOf(this, BackgroundStore.VIDEO, n);
+        if (!f.isFile()) {
+            applyBackgrounds(); // ese ya no existe: se vuelve a resolver y salta al siguiente que exista
+            return;
+        }
+        showVideoFor(scope, f, p);
+        syncVideoPlayback();
+    }
+
+    /** El video no se pudo reproducir: se quita de pantalla y queda el estático o el color por defecto, sin errores. */
+    private void onVideoError(String scope) {
+        BackdropView b = BackgroundStore.HOME.equals(scope) ? homeBackdrop : drawerBackdrop;
+        b.clearVideo();
+        updateBars();
     }
 
     // =========================================================================
@@ -706,6 +788,7 @@ public class MainActivity extends Activity {
     private void openDrawer() {
         if (drawerOpen) return;
         drawerOpen = true;
+        syncVideoPlayback(); // el video de la Home se pausa y corre el del cajón
         dismissMenu();
         dismissSheet();
 
@@ -728,6 +811,7 @@ public class MainActivity extends Activity {
     private void closeDrawer(boolean animate, boolean fast) {
         if (!drawerOpen) return;
         drawerOpen = false;
+        syncVideoPlayback(); // el video del cajón se pausa y vuelve a correr el de la Home
         dismissMenu();
         drawerSheet.animate().cancel();
         drawerScrim.animate().cancel();

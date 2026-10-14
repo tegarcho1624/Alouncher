@@ -31,9 +31,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Selector de recursos de una lista (por ahora: imágenes de fondo).
+ * Selector de recursos de una lista: imágenes de fondo o videos de fondo animado.
  * Cada fila: miniatura · nombre y extensión · palomita si es la activa · eliminar · asa para arrastrar.
- * Tocar la fila aplica ese fondo. Eliminar pide confirmación (Sí / No). Arrastrar reordena.
+ * Tocar la fila aplica ese recurso. Eliminar pide confirmación (Sí / No). Arrastrar reordena.
+ * Solo en videos: anterior/siguiente, Aleatorio, Repetir (la lista) y Bucle (el video actual).
  */
 public class PlaylistActivity extends Activity {
     static final String EXTRA_SCOPE = "scope";
@@ -47,11 +48,19 @@ public class PlaylistActivity extends Activity {
 
     private String scope;
     private String type;
+    private boolean isVideo;
+    private String navKey;
     private BackgroundStore.Playlist pl;
 
     private LinearLayout root;
     private TextView subtitle;
     private TextView emptyView;
+    private TextView nowPlaying;
+    private ImageView prevBtn;
+    private ImageView nextBtn;
+    private TextView tShuffle;
+    private TextView tRepeat;
+    private TextView tLoop;
     private RecyclerView list;
     private RowAdapter adapter;
     private ItemTouchHelper touch;
@@ -85,7 +94,9 @@ public class PlaylistActivity extends Activity {
         String s = getIntent().getStringExtra(EXTRA_SCOPE);
         String t = getIntent().getStringExtra(EXTRA_TYPE);
         scope = BackgroundStore.DRAWER.equals(s) ? BackgroundStore.DRAWER : BackgroundStore.HOME;
-        type = t != null ? t : BackgroundStore.IMAGE;
+        type = BackgroundStore.VIDEO.equals(t) ? BackgroundStore.VIDEO : BackgroundStore.IMAGE;
+        isVideo = BackgroundStore.VIDEO.equals(type);
+        navKey = scope + ":" + type;
         pl = BackgroundStore.load(this, scope, type);
 
         root = new LinearLayout(this);
@@ -109,7 +120,7 @@ public class PlaylistActivity extends Activity {
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(this);
-        title.setText(getString(R.string.fondo_de, getString(
+        title.setText(getString(isVideo ? R.string.fondo_animado_de : R.string.fondo_de, getString(
                 BackgroundStore.HOME.equals(scope) ? R.string.seg_home : R.string.seg_drawer)));
         title.setTextColor(getColor(R.color.ink));
         title.setTextSize(20);
@@ -140,6 +151,9 @@ public class PlaylistActivity extends Activity {
         sp.setMargins(dp(24), dp(4), dp(24), dp(8));
         root.addView(seg, sp);
 
+        // ---- Solo videos: anterior / siguiente y modos de reproducción
+        if (isVideo) buildVideoControls();
+
         // ---- Lista
         FrameLayout body = new FrameLayout(this);
         list = new RecyclerView(this);
@@ -152,7 +166,7 @@ public class PlaylistActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         emptyView = new TextView(this);
-        emptyView.setText(R.string.vacio_imagenes);
+        emptyView.setText(isVideo ? R.string.vacio_videos : R.string.vacio_imagenes);
         emptyView.setTextColor(getColor(R.color.mut));
         emptyView.setTextSize(15);
         emptyView.setGravity(Gravity.CENTER);
@@ -162,17 +176,19 @@ public class PlaylistActivity extends Activity {
         root.addView(body, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        // ---- Pie: Quitar fondo (destructiva, secundaria) + Añadir (acción principal)
+        // ---- Pie: Quitar (destructiva, secundaria) + Añadir (acción principal)
         LinearLayout footer = new LinearLayout(this);
         footer.setOrientation(LinearLayout.VERTICAL);
         footer.setPadding(dp(24), dp(8), dp(24), dp(20));
-        TextView remove = BottomSheet.button(this, getString(R.string.quitar_fondo), false);
+        TextView remove = BottomSheet.button(this,
+                getString(isVideo ? R.string.quitar_fondo_animado : R.string.quitar_fondo), false);
         remove.setTextColor(getColor(R.color.danger));
         remove.setOnClickListener(v -> clearActive());
         footer.addView(remove, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        TextView add = BottomSheet.button(this, getString(R.string.anadir_imagenes), true);
-        add.setOnClickListener(v -> pickImages());
+        TextView add = BottomSheet.button(this,
+                getString(isVideo ? R.string.anadir_video : R.string.anadir_imagenes), true);
+        add.setOnClickListener(v -> pickFiles());
         LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         ap.topMargin = dp(10);
@@ -210,6 +226,7 @@ public class PlaylistActivity extends Activity {
             public void clearView(RecyclerView rv, RecyclerView.ViewHolder vh) {
                 super.clearView(rv, vh);
                 vh.itemView.setAlpha(1f);
+                PlaylistNav.reset(navKey);
                 BackgroundStore.save(PlaylistActivity.this, scope, type, pl); // el orden se guarda al soltar
             }
         });
@@ -218,6 +235,93 @@ public class PlaylistActivity extends Activity {
         setContentView(root);
         FontManager.apply(root);
         refreshHeader();
+    }
+
+    /** Anterior · "Reproduciendo …" · Siguiente, y los botones Aleatorio / Repetir / Bucle (dorados si están activos). */
+    private void buildVideoControls() {
+        LinearLayout transport = new LinearLayout(this);
+        transport.setOrientation(LinearLayout.HORIZONTAL);
+        transport.setGravity(Gravity.CENTER_VERTICAL);
+
+        prevBtn = iconButton(R.drawable.ic_prev, getString(R.string.anterior));
+        prevBtn.setOnClickListener(v -> step(false));
+        transport.addView(prevBtn, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        nowPlaying = new TextView(this);
+        nowPlaying.setTextColor(getColor(R.color.mut));
+        nowPlaying.setTextSize(14);
+        nowPlaying.setGravity(Gravity.CENTER);
+        nowPlaying.setSingleLine(true);
+        nowPlaying.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        np.setMargins(dp(8), 0, dp(8), 0);
+        transport.addView(nowPlaying, np);
+
+        nextBtn = iconButton(R.drawable.ic_next, getString(R.string.siguiente));
+        nextBtn.setOnClickListener(v -> step(true));
+        transport.addView(nextBtn, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        LinearLayout.LayoutParams trp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        trp.setMargins(dp(24), 0, dp(24), dp(4));
+        root.addView(transport, trp);
+
+        LinearLayout toggles = new LinearLayout(this);
+        toggles.setOrientation(LinearLayout.HORIZONTAL);
+        tShuffle = toggle(R.string.aleatorio, pl.shuffle, () -> {
+            pl.shuffle = !pl.shuffle;
+            PlaylistNav.reset(navKey);
+        });
+        tRepeat = toggle(R.string.repetir, pl.repeat, () -> pl.repeat = !pl.repeat);
+        tLoop = toggle(R.string.bucle, pl.loop, () -> pl.loop = !pl.loop);
+        toggles.addView(tShuffle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams mid = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        mid.leftMargin = dp(8);
+        toggles.addView(tRepeat, mid);
+        LinearLayout.LayoutParams last = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        last.leftMargin = dp(8);
+        toggles.addView(tLoop, last);
+        LinearLayout.LayoutParams tgp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tgp.setMargins(dp(24), dp(4), dp(24), dp(2));
+        root.addView(toggles, tgp);
+
+        TextView hint = new TextView(this);
+        hint.setText(R.string.ayuda_bucle);
+        hint.setTextColor(getColor(R.color.mut));
+        hint.setTextSize(12);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hp.setMargins(dp(28), dp(4), dp(28), dp(4));
+        root.addView(hint, hp);
+    }
+
+    private ImageView iconButton(int res, String description) {
+        ImageView b = new ImageView(this);
+        b.setImageResource(res);
+        b.setScaleType(ImageView.ScaleType.CENTER);
+        b.setBackgroundResource(R.drawable.btn_ghost);
+        b.setContentDescription(description);
+        return b;
+    }
+
+    private TextView toggle(int label, boolean on, Runnable change) {
+        TextView t = new TextView(this);
+        t.setText(label);
+        t.setGravity(Gravity.CENTER);
+        t.setMinHeight(dp(44));
+        t.setTextSize(15);
+        t.setClickable(true);
+        t.setFocusable(true);
+        UiKit.styleToggle(t, on);
+        t.setOnClickListener(v -> {
+            change.run();
+            BackgroundStore.save(this, scope, type, pl);
+            UiKit.styleToggle(tShuffle, pl.shuffle);
+            UiKit.styleToggle(tRepeat, pl.repeat);
+            UiKit.styleToggle(tLoop, pl.loop);
+        });
+        return t;
     }
 
     private int modeIndex(String mode) {
@@ -231,11 +335,21 @@ public class PlaylistActivity extends Activity {
         BackgroundStore.Item cur = pl.current();
         if (cur != null) {
             subtitle.setText(getString(R.string.aplicado, cur.name));
+        } else if (isVideo) {
+            subtitle.setText(R.string.sin_animado);
         } else {
             subtitle.setText(BackgroundStore.HOME.equals(scope)
                     ? R.string.sin_fondo_sistema : R.string.sin_fondo_drawer);
         }
         emptyView.setVisibility(pl.items.isEmpty() ? View.VISIBLE : View.GONE);
+        if (isVideo) {
+            nowPlaying.setText(cur != null ? getString(R.string.reproduciendo, cur.name)
+                    : getString(R.string.ninguno_activo));
+            // como en Voltea: anterior/siguiente solo con más de un elemento
+            int vis = pl.items.size() > 1 ? View.VISIBLE : View.INVISIBLE;
+            prevBtn.setVisibility(vis);
+            nextBtn.setVisibility(vis);
+        }
     }
 
     // ---- Lista -------------------------------------------------------------------
@@ -313,7 +427,12 @@ public class PlaylistActivity extends Activity {
             h.name.setTextColor(getColor(current ? R.color.gold_hi : R.color.ink));
             h.meta.setText(it.ext());
             h.check.setVisibility(current ? View.VISIBLE : View.GONE);
-            ImageUtil.loadThumb(BackgroundStore.fileOf(PlaylistActivity.this, type, it), h.thumb, dp(52));
+            if (isVideo) {
+                ImageUtil.loadVideoThumb(BackgroundStore.fileOf(PlaylistActivity.this, type, it),
+                        BackgroundStore.thumbFile(PlaylistActivity.this, it), h.thumb, dp(52));
+            } else {
+                ImageUtil.loadThumb(BackgroundStore.fileOf(PlaylistActivity.this, type, it), h.thumb, dp(52));
+            }
 
             h.row.setOnClickListener(v -> applyItem(it));
             h.trash.setOnClickListener(v -> confirmDelete(it));
@@ -334,20 +453,35 @@ public class PlaylistActivity extends Activity {
 
     private void applyItem(BackgroundStore.Item it) {
         if (it.id.equals(pl.cur)) return;
+        if (isVideo) PlaylistNav.picked(navKey, pl, it.id);
         pl.cur = it.id;
         BackgroundStore.save(this, scope, type, pl);
         adapter.notifyDataSetChanged();
         refreshHeader();
-        Toast.makeText(this, R.string.fondo_aplicado, Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, isVideo ? R.string.fondo_animado_aplicado : R.string.fondo_aplicado,
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** Anterior / siguiente (siempre dan la vuelta a la lista; con Aleatorio siguen el barajado). */
+    private void step(boolean forward) {
+        BackgroundStore.Item n = forward
+                ? PlaylistNav.next(navKey, pl, false)
+                : PlaylistNav.prev(navKey, pl);
+        if (n == null) return;
+        pl.cur = n.id;
+        BackgroundStore.save(this, scope, type, pl);
+        adapter.notifyDataSetChanged();
+        refreshHeader();
     }
 
     private void clearActive() {
         if (pl.cur.isEmpty()) return;
-        pl.cur = "";
+        pl.cur = ""; // la lista se conserva; solo se desactiva
         BackgroundStore.save(this, scope, type, pl);
         adapter.notifyDataSetChanged();
         refreshHeader();
-        Toast.makeText(this, R.string.fondo_quitado, Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, isVideo ? R.string.fondo_animado_quitado : R.string.fondo_quitado,
+                Toast.LENGTH_SHORT).show();
     }
 
     /** Menú de confirmación al eliminar: "Sí" (rojo) y "No". */
@@ -375,8 +509,17 @@ public class PlaylistActivity extends Activity {
     private void deleteItem(BackgroundStore.Item it) {
         int idx = pl.indexOf(it.id);
         if (idx < 0) return;
+        boolean wasCurrent = it.id.equals(pl.cur);
         pl.items.remove(idx);
-        if (it.id.equals(pl.cur)) pl.cur = ""; // era el activo: vuelve el fondo por defecto
+        if (wasCurrent) {
+            // Imagen: vuelve el fondo por defecto. Video: sigue con el que ocupó su lugar (si era el último, se quita el animado).
+            if (isVideo && !pl.items.isEmpty()) {
+                pl.cur = pl.items.get(Math.min(idx, pl.items.size() - 1)).id;
+            } else {
+                pl.cur = "";
+            }
+        }
+        PlaylistNav.reset(navKey);
         BackgroundStore.deleteFile(this, type, it);
         BackgroundStore.save(this, scope, type, pl);
         adapter.notifyDataSetChanged();
@@ -385,10 +528,10 @@ public class PlaylistActivity extends Activity {
 
     // ---- Añadir desde el dispositivo ----------------------------------------------------
 
-    private void pickImages() {
+    private void pickFiles() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("image/*");
+        i.setType(isVideo ? "video/*" : "image/*");
         i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         try {
             startActivityForResult(i, REQ_ADD);
@@ -425,17 +568,22 @@ public class PlaylistActivity extends Activity {
                 if (isDestroyed()) return;
                 boolean wasEmpty = pl.items.isEmpty();
                 pl.items.addAll(added);
-                if (wasEmpty && !added.isEmpty()) pl.cur = added.get(0).id; // la primera pasa a ser el fondo
-                if (!added.isEmpty()) BackgroundStore.save(this, scope, type, pl);
+                if (wasEmpty && !added.isEmpty()) pl.cur = added.get(0).id; // el primero pasa a ser el fondo
+                if (!added.isEmpty()) {
+                    PlaylistNav.reset(navKey);
+                    BackgroundStore.save(this, scope, type, pl);
+                }
                 adapter.notifyDataSetChanged();
                 refreshHeader();
                 if (!added.isEmpty()) {
-                    Toast.makeText(this, getResources().getQuantityString(R.plurals.imagenes_anadidas,
+                    Toast.makeText(this, getResources().getQuantityString(
+                            isVideo ? R.plurals.videos_anadidos : R.plurals.imagenes_anadidas,
                             added.size(), added.size()), Toast.LENGTH_SHORT).show();
                     list.scrollToPosition(pl.items.size() - 1);
                 }
                 if (failedCount > 0) {
-                    Toast.makeText(this, R.string.imagen_no_leida, Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, isVideo ? R.string.video_no_leido : R.string.imagen_no_leida,
+                            Toast.LENGTH_LONG).show();
                 }
             });
         }).start();
