@@ -117,6 +117,8 @@ public class MainActivity extends Activity {
     private Map<String, AppEntry> allApps = new HashMap<>(); // visibles + ocultas, por clave
     private List<AppEntry> hiddenApps = new ArrayList<>();
     private boolean loaded;
+    private BottomSheet folderSheet;   // panel de la carpeta abierta
+    private String openFolderId;
     private int fontApplied = -1; // versión de la fuente que ya está aplicada a las vistas
     private BackdropView homeBackdrop;   // fondo de la Home
     private BackdropView drawerBackdrop; // fondo del cajón
@@ -150,10 +152,18 @@ public class MainActivity extends Activity {
     private static final class DragPayload {
         final String key;
         final String instanceId;
-        DragPayload(String key, String instanceId) {
+        final String folderId; // si no es null, lo que se arrastra es una carpeta
+        DragPayload(String key, String instanceId, String folderId) {
             this.key = key;
             this.instanceId = instanceId;
+            this.folderId = folderId;
         }
+    }
+
+    /** Etiqueta de una carpeta cerrada en la Home. */
+    private static final class FolderRef {
+        final String id;
+        FolderRef(String id) { this.id = id; }
     }
 
     /** Lo que lleva como etiqueta cada ícono colocado en la Home o el dock. */
@@ -242,11 +252,14 @@ public class MainActivity extends Activity {
             @Override public void onLongPress(View v) {
                 Object t = v.getTag();
                 if (t instanceof Placed) showPlacedMenu(v, (Placed) t);
+                else if (t instanceof FolderRef) showFolderMenu(v, ((FolderRef) t).id);
             }
             @Override public void onDragStart(View v) {
                 Object t = v.getTag();
                 if (t instanceof Placed) {
                     beginDrag(v, ((Placed) t).app.key(), ((Placed) t).instanceId);
+                } else if (t instanceof FolderRef) {
+                    beginFolderDrag(v, ((FolderRef) t).id);
                 }
             }
         });
@@ -339,6 +352,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         dismissMenu();
         dismissSheet();
+        dismissFolderPanel();
         if (Intent.ACTION_MAIN.equals(intent.getAction())) {
             if (drawerOpen) closeDrawer(true, false);
             if (editMode) {
@@ -367,6 +381,7 @@ public class MainActivity extends Activity {
         ui.removeCallbacks(reloadTask);
         dismissMenu();
         dismissSheet();
+        dismissFolderPanel();
         if (pkgReceiver != null) unregisterReceiver(pkgReceiver);
         io.shutdownNow();
         bgIo.shutdownNow();
@@ -675,6 +690,272 @@ public class MainActivity extends Activity {
     }
 
     // =========================================================================
+    //  Carpetas
+    // =========================================================================
+
+    private String folderDisplayName(HomeStore.Folder f) {
+        return f.name.isEmpty() ? getString(R.string.carpeta) : f.name;
+    }
+
+    /** Carpeta cerrada: del tamaño de un ícono, con las miniaturas de las primeras apps y su nombre debajo. */
+    private View makeFolderItem(HomeStore.Folder fo, FrameLayout cell) {
+        View item = getLayoutInflater().inflate(R.layout.item_app, cell, false);
+        ((FrameLayout.LayoutParams) item.getLayoutParams()).gravity = Gravity.CENTER;
+        ImageView icon = item.findViewById(R.id.icon);
+        TextView label = item.findViewById(R.id.label);
+
+        List<Drawable> minis = new ArrayList<>();
+        for (HomeStore.Member m : fo.members) {
+            AppEntry a = allApps.get(m.key);
+            if (a == null) continue; // desinstalada o aún cargando
+            minis.add(a.newIcon(getResources()));
+            if (minis.size() == 4) break;
+        }
+        icon.setImageDrawable(new FolderDrawable(minis, dp(64)));
+        label.setText(folderDisplayName(fo));
+        label.setShadowLayer(dp(3), 0, dp(1), 0xCC000000);
+        FontManager.applyTo(label);
+
+        item.setTag(new FolderRef(fo.id));
+        item.setOnClickListener(v -> showFolderPanel(fo.id));
+        placedDrag.attach(item);
+        return item;
+    }
+
+    /**
+     * Reglas al soltar (Home):
+     *  - app sobre otra app  -> se crea una carpeta con ambas, en el lugar de la receptora
+     *  - app sobre carpeta   -> se añade a ella
+     *  - carpeta sobre carpeta -> las apps de la primera pasan a la segunda
+     *  - carpeta sobre app   -> intercambian lugares
+     *  - celda libre         -> app nueva (desde el cajón) o mover la existente
+     * El dock sigue como antes (sin carpetas).
+     */
+    private int applyDrop(DragPayload p, Target t) {
+        if (p.folderId != null) {
+            if (t.dock) return HomeStore.OK; // las carpetas no van al dock
+            return homeStore.moveFolder(p.folderId, t.page, t.row, t.col);
+        }
+        if (!t.dock) {
+            HomeStore.Folder fo = homeStore.folderAt(t.page, t.row, t.col);
+            if (fo != null) return homeStore.dropOnFolder(p.key, p.instanceId, fo.id);
+            HomeStore.Instance occ = homeStore.instanceAt(false, t.page, t.row, t.col);
+            if (occ != null) {
+                if (occ.id.equals(p.instanceId)) return HomeStore.OK; // soltada donde estaba
+                return homeStore.dropOnInstance(p.key, p.instanceId, occ.id);
+            }
+        }
+        return p.instanceId == null
+                // desde el cajón: instancia NUEVA (aunque la app ya esté en la Home)
+                ? homeStore.addNew(p.key, t.dock, t.page, t.row, t.col)
+                // ya colocada: se MUEVE (no se crea otra)
+                : homeStore.move(p.instanceId, t.dock, t.page, t.row, t.col);
+    }
+
+    private void beginFolderDrag(View v, String folderId) {
+        dismissMenu();
+        ClipData clip = ClipData.newPlainText("folder", folderId);
+        boolean started = v.startDragAndDrop(clip, new View.DragShadowBuilder(v),
+                new DragPayload(null, null, folderId), 0);
+        if (started) v.setAlpha(0.35f);
+    }
+
+    /** Menú de la carpeta cerrada en la Home. */
+    private void showFolderMenu(View anchor, String folderId) {
+        LinearLayout col = newMenuColumn();
+        col.addView(menuRow(getString(R.string.cambiar_de_nombre), () -> showFolderRenameSheet(folderId)));
+        col.addView(menuRow(getString(R.string.eliminar_carpeta), () -> deleteFolder(folderId)));
+        popup(anchor, col);
+    }
+
+    /** Elimina la carpeta y devuelve sus apps a la Home (en lugares libres cercanos). */
+    private void deleteFolder(String folderId) {
+        int lost = homeStore.deleteFolder(folderId);
+        if (folderId.equals(openFolderId)) dismissFolderPanel();
+        renderHome();
+        toast(lost > 0 ? R.string.apps_no_caben : R.string.carpeta_eliminada);
+    }
+
+    // ---- Panel de la carpeta abierta ---------------------------------------------
+
+    private void showFolderPanel(String folderId) {
+        dismissFolderPanel();
+        dismissMenu();
+        HomeStore.Folder f = homeStore.folder(folderId);
+        if (f == null) return;
+
+        BottomSheet s = new BottomSheet(this, folderDisplayName(f), null);
+        TextView title = s.title();
+        title.getLayoutParams().width = ViewGroup.LayoutParams.WRAP_CONTENT; // el lápiz queda junto al nombre
+        title.setPadding(0, dp(6), 0, dp(6));
+        title.setCompoundDrawablePadding(dp(10));
+        title.setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, R.drawable.ic_pencil, 0);
+        title.setClickable(true);
+        title.setOnClickListener(v -> showFolderRenameSheet(folderId)); // tocar el nombre lo edita
+        s.setOnDismissListener(() -> {
+            if (folderSheet == s) {
+                folderSheet = null;
+                openFolderId = null;
+            }
+        });
+        folderSheet = s;
+        openFolderId = folderId;
+        fillFolderBody();
+        s.show();
+    }
+
+    /** (Re)dibuja las apps de la carpeta abierta en un grid de 4 columnas. Si la carpeta ya no existe, cierra el panel. */
+    private void fillFolderBody() {
+        if (folderSheet == null || openFolderId == null) return;
+        HomeStore.Folder f = homeStore.folder(openFolderId);
+        if (f == null) {
+            dismissFolderPanel();
+            return;
+        }
+        folderSheet.title().setText(folderDisplayName(f));
+        LinearLayout body = folderSheet.body();
+        body.removeAllViews();
+
+        LinearLayout row = null;
+        int col = 0;
+        for (HomeStore.Member m : f.members) {
+            AppEntry app = allApps.get(m.key);
+            if (app == null) continue; // desinstalada o aún cargando: se salta, sin errores
+            if (col == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                body.addView(row, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+            row.addView(makeFolderMemberView(f.id, m, app, row),
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            col = (col + 1) % 4;
+        }
+        // completa la última fila con huecos para que todas las celdas midan lo mismo
+        while (col != 0 && row != null) {
+            row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+            col = (col + 1) % 4;
+        }
+        FontManager.apply(body);
+    }
+
+    private View makeFolderMemberView(String folderId, HomeStore.Member m, AppEntry app, ViewGroup parent) {
+        View item = getLayoutInflater().inflate(R.layout.item_app, parent, false);
+        ImageView icon = item.findViewById(R.id.icon);
+        TextView label = item.findViewById(R.id.label);
+        icon.setImageDrawable(app.newIcon(getResources()));
+        label.setText(app.label());
+        item.setOnClickListener(v -> {
+            dismissFolderPanel();
+            openApp(app);
+        });
+        item.setOnLongClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            showFolderMemberMenu(v, folderId, m, app);
+            return true;
+        });
+        return item;
+    }
+
+    /** Menú de una app dentro de la carpeta (igual que el de la Home, con "Quitar de la carpeta"). */
+    private void showFolderMemberMenu(View anchor, String folderId, HomeStore.Member m, AppEntry app) {
+        LinearLayout col = newMenuColumn();
+        col.addView(menuRow(getString(R.string.abrir), () -> {
+            dismissFolderPanel();
+            openApp(app);
+        }));
+        col.addView(menuRow(getString(R.string.info_app), () -> openInfo(app)));
+        col.addView(menuRow(getString(R.string.cambiar_icono), () -> pickIcon(app)));
+        col.addView(menuRow(getString(R.string.cambiar_nombre), () -> showRenameSheet(app)));
+        col.addView(menuRow(getString(R.string.quitar_de_carpeta), () -> removeFromFolder(folderId, m)));
+        popup(anchor, col);
+    }
+
+    /** Saca la app de la carpeta y la deja en la Home. Si la carpeta queda vacía, desaparece. */
+    private void removeFromFolder(String folderId, HomeStore.Member m) {
+        if (homeStore.removeMember(folderId, m.id) == HomeStore.FULL) {
+            toast(R.string.home_llena);
+            return;
+        }
+        renderHome(); // también actualiza (o cierra) el panel
+    }
+
+    private void showFolderRenameSheet(String folderId) {
+        HomeStore.Folder f = homeStore.folder(folderId);
+        if (f == null) return;
+        dismissSheet();
+        BottomSheet s = new BottomSheet(this, getString(R.string.cambiar_de_nombre), null);
+
+        EditText et = new EditText(this);
+        et.setText(folderDisplayName(f));
+        et.setSelectAllOnFocus(true);
+        et.setSingleLine(true);
+        et.setInputType(InputType.TYPE_CLASS_TEXT);
+        et.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        et.setFilters(new InputFilter[]{new InputFilter.LengthFilter(40)});
+        et.setTextColor(getColor(R.color.ink));
+        et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        et.setHighlightColor(getColor(R.color.gold_bg));
+        et.setBackgroundResource(R.drawable.input_bg);
+        et.setMinHeight(dp(44));
+        et.setPadding(dp(14), dp(10), dp(14), dp(10));
+        s.body().addView(et, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        Runnable save = () -> {
+            String t = et.getText().toString().trim();
+            // Vacío o igual al nombre por defecto = volver a "Carpeta"
+            homeStore.renameFolder(folderId, (t.isEmpty() || t.equals(getString(R.string.carpeta))) ? "" : t);
+            s.dismiss();
+            renderHome(); // el nombre nuevo se ve debajo de la carpeta y en el panel
+        };
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        TextView ok = BottomSheet.button(this, getString(R.string.guardar), true);
+        TextView cancel = BottomSheet.button(this, getString(R.string.cancelar), false);
+        ok.setOnClickListener(v -> save.run());
+        cancel.setOnClickListener(v -> s.dismiss());
+        buttons.addView(ok, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.4f));
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        cp.leftMargin = dp(10);
+        buttons.addView(cancel, cp);
+        s.footer().addView(buttons);
+
+        if (!f.name.isEmpty()) {
+            TextView restore = BottomSheet.button(this, getString(R.string.restaurar_nombre), false);
+            restore.setOnClickListener(v -> {
+                homeStore.renameFolder(folderId, "");
+                s.dismiss();
+                renderHome();
+            });
+            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rp.topMargin = dp(10);
+            s.footer().addView(restore, rp);
+        }
+
+        et.setOnEditorActionListener((v, actionId, ev) -> {
+            save.run();
+            return true;
+        });
+
+        sheet = s;
+        s.keyboard();
+        s.show();
+        et.requestFocus();
+    }
+
+    private void dismissFolderPanel() {
+        if (folderSheet != null) {
+            BottomSheet s = folderSheet;
+            folderSheet = null;
+            openFolderId = null;
+            s.dismiss();
+        }
+    }
+
+    // =========================================================================
     //  Acciones básicas
     // =========================================================================
 
@@ -810,6 +1091,11 @@ public class MainActivity extends Activity {
             FrameLayout cell = h.cells[inst.row][inst.col];
             cell.addView(makeHomeItem(inst, app, cell));
         }
+        for (HomeStore.Folder fo : homeStore.folders()) {
+            if (fo.page != pageId) continue;
+            FrameLayout cell = h.cells[fo.row][fo.col];
+            cell.addView(makeFolderItem(fo, cell));
+        }
     }
 
     /** Redibuja páginas, dock, indicador y mensaje desde lo guardado. */
@@ -827,8 +1113,10 @@ public class MainActivity extends Activity {
                 shown++;
             }
         }
+        shown += homeStore.folders().size();
         syncIndicator();
         homeHint.setVisibility(loaded && shown == 0 ? View.VISIBLE : View.GONE);
+        fillFolderBody(); // si hay una carpeta abierta, se actualiza (nombres, íconos, apps desinstaladas)
     }
 
     private void syncIndicator() {
@@ -983,7 +1271,7 @@ public class MainActivity extends Activity {
         dismissMenu();
         ClipData clip = ClipData.newPlainText("app", key);
         boolean started = v.startDragAndDrop(clip, new View.DragShadowBuilder(v),
-                new DragPayload(key, instanceId), 0);
+                new DragPayload(key, instanceId, null), 0);
         if (!started) return;
         if (instanceId == null) {
             closeDrawer(true, true);                 // el cajón baja para dejar ver la Home
@@ -1029,11 +1317,7 @@ public class MainActivity extends Activity {
                     return true;
                 }
                 if (t == null) return false; // soltado fuera de la cuadrícula y del dock: no pasa nada
-                int res = (payload.instanceId == null)
-                        // desde el cajón: instancia NUEVA (aunque la app ya esté en la Home)
-                        ? homeStore.addNew(payload.key, t.dock, t.page, t.row, t.col)
-                        // ya colocada: se MUEVE (no se crea otra)
-                        : homeStore.move(payload.instanceId, t.dock, t.page, t.row, t.col);
+                int res = applyDrop(payload, t);
                 if (res == HomeStore.FULL) toast(t.dock ? R.string.dock_lleno : R.string.home_llena);
                 return true;
             }
@@ -1233,6 +1517,11 @@ public class MainActivity extends Activity {
             if (app == null) continue;
             icons.add(app.newIcon(getResources()));
             cells.add(new int[]{inst.row, inst.col});
+        }
+        for (HomeStore.Folder fo : homeStore.folders()) {
+            if (fo.page != pageId) continue;
+            icons.add(getDrawable(R.drawable.ic_folder));
+            cells.add(new int[]{fo.row, fo.col});
         }
         thumb.setItems(icons, cells);
     }

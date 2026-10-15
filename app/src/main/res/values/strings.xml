@@ -155,4 +155,11 @@
         <item quantity="one">%d audio añadido</item>
         <item quantity="other">%d audios añadidos</item>
     </plurals>
+
+    <string name="carpeta">Carpeta</string>
+    <string name="cambiar_de_nombre">Cambiar de nombre</string>
+    <string name="eliminar_carpeta">Eliminar carpeta</string>
+    <string name="quitar_de_carpeta">Quitar de la carpeta</string>
+    <string name="apps_no_caben">Algunas apps no cupieron en esta página (siguen en el cajón)</string>
+    <string name="carpeta_eliminada">Carpeta eliminada</string>
 </resources>

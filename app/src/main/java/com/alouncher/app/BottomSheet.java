@@ -23,6 +23,7 @@ final class BottomSheet {
     private final LinearLayout body;
     private final LinearLayout footer;
     private boolean keyboard;
+    private final TextView titleView;
 
     BottomSheet(Activity act, String title, String subtitle) {
         this.act = act;
@@ -41,6 +42,7 @@ final class BottomSheet {
         sheet.addView(grip, gp);
 
         TextView t = new TextView(act);
+        titleView = t;
         t.setText(title);
         t.setTextColor(act.getColor(R.color.ink));
         t.setTextSize(22);
@@ -77,6 +79,11 @@ final class BottomSheet {
         fp.topMargin = dp(act, 16);
         sheet.addView(footer, fp);
     }
+
+    TextView title() { return titleView; }
+
+    /** Se llama cuando la hoja se cierra (por el botón, tocando fuera o con "atrás"). */
+    void setOnDismissListener(Runnable r) { dialog.setOnDismissListener(d -> r.run()); }
 
     LinearLayout body() { return body; }
 
