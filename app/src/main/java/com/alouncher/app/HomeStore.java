@@ -500,6 +500,15 @@ final class HomeStore {
         return OK;
     }
 
+    /** Añade una app al final de la carpeta (desde el botón "+"). Se permite repetir una app, como con las instancias. */
+    synchronized int addMember(String folderId, String key) {
+        Folder f = folders.get(folderId);
+        if (f == null) return FULL;
+        f.members.add(new Member(UUID.randomUUID().toString(), key));
+        save();
+        return OK;
+    }
+
     /** Se suelta una carpeta sobre otra: las apps de la primera pasan a la segunda y la primera desaparece. */
     synchronized int mergeFolders(String srcId, String dstId) {
         if (srcId.equals(dstId)) return OK;

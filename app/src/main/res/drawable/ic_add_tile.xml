@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/gold_bg" />
+            <stroke android:width="1.5dp" android:color="@color/gold" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item
+        android:bottom="18dp"
+        android:drawable="@drawable/ic_plus_gold"
+        android:left="18dp"
+        android:right="18dp"
+        android:top="18dp" />
+</layer-list>

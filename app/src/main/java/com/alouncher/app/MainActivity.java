@@ -118,6 +118,8 @@ public class MainActivity extends Activity {
     private List<AppEntry> hiddenApps = new ArrayList<>();
     private boolean loaded;
     private BottomSheet folderSheet;   // panel de la carpeta abierta
+    private String pickFolderId;       // != null: el cajón está en modo "elegir app para esta carpeta"
+    private TextView drawerTitle;
     private String openFolderId;
     private int fontApplied = -1; // versión de la fuente que ya está aplicada a las vistas
     private BackdropView homeBackdrop;   // fondo de la Home
@@ -239,6 +241,7 @@ public class MainActivity extends Activity {
         drawerLayer = findViewById(R.id.drawer_layer);
         drawerScrim = findViewById(R.id.drawer_scrim);
         drawerSheet = findViewById(R.id.drawer_sheet);
+        drawerTitle = findViewById(R.id.drawer_title);
         homeBackdrop = findViewById(R.id.home_bg);
         drawerBackdrop = findViewById(R.id.drawer_bg);
         drawerBackdrop.setTopCornerRadius(dp(32)); // sigue la forma redondeada del cajón
@@ -272,11 +275,19 @@ public class MainActivity extends Activity {
         grid.setLayoutManager(new GridLayoutManager(this, DRAWER_COLUMNS));
         adapter = new AppAdapter(new AppAdapter.Listener() {
             @Override public void onOpen(AppEntry app) {
+                if (pickFolderId != null) {          // modo "elegir app para la carpeta"
+                    addToPickedFolder(app);
+                    return;
+                }
                 openApp(app);
                 closeDrawer(false, false);
             }
-            @Override public void onMenu(View anchor, AppEntry app) { showMenu(anchor, app); }
-            @Override public void onDragStart(View anchor, AppEntry app) { beginDrag(anchor, app.key(), null); }
+            @Override public void onMenu(View anchor, AppEntry app) {
+                if (pickFolderId == null) showMenu(anchor, app);
+            }
+            @Override public void onDragStart(View anchor, AppEntry app) {
+                if (pickFolderId == null) beginDrag(anchor, app.key(), null);
+            }
             @Override public void onHiddenApps() { showHiddenSheet(); }
         });
         grid.setAdapter(adapter);
@@ -353,6 +364,7 @@ public class MainActivity extends Activity {
         dismissMenu();
         dismissSheet();
         dismissFolderPanel();
+        pickFolderId = null; // HOME cancela el modo "elegir app para la carpeta"
         if (Intent.ACTION_MAIN.equals(intent.getAction())) {
             if (drawerOpen) closeDrawer(true, false);
             if (editMode) {
@@ -831,12 +843,54 @@ public class MainActivity extends Activity {
                     new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             col = (col + 1) % 4;
         }
+        // El botón "+" va al final, después de la última app, con el mismo tamaño que una app
+        if (col == 0) {
+            row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            body.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        row.addView(makeFolderAddView(f.id, row),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        col = (col + 1) % 4;
         // completa la última fila con huecos para que todas las celdas midan lo mismo
         while (col != 0 && row != null) {
             row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
             col = (col + 1) % 4;
         }
         FontManager.apply(body);
+    }
+
+    /** El botón "+" de la carpeta: mismo tamaño y forma que una app, con el acento dorado. */
+    private View makeFolderAddView(String folderId, ViewGroup parent) {
+        View item = getLayoutInflater().inflate(R.layout.item_app, parent, false);
+        ImageView icon = item.findViewById(R.id.icon);
+        TextView label = item.findViewById(R.id.label);
+        icon.setImageResource(R.drawable.ic_add_tile);
+        label.setText(R.string.anadir_app);
+        label.setTextColor(getColor(R.color.gold_hi));
+        item.setContentDescription(getString(R.string.anadir_app));
+        item.setOnClickListener(v -> startPickForFolder(folderId));
+        return item;
+    }
+
+    /** "+": cierra el panel y abre el cajón en modo selección; la app que se toque se añade a esa carpeta. */
+    private void startPickForFolder(String folderId) {
+        if (folderId == null) return;
+        pickFolderId = folderId;
+        dismissFolderPanel();
+        openDrawer();
+    }
+
+    /** Se eligió una app en el cajón: se añade al final de la carpeta y se vuelve a ella, ya actualizada. */
+    private void addToPickedFolder(AppEntry app) {
+        final String id = pickFolderId;
+        pickFolderId = null; // el modo termina al elegir
+        if (id != null && homeStore.addMember(id, app.key()) == HomeStore.OK) {
+            renderHome(); // la carpeta de la Home también muestra la miniatura nueva
+        }
+        closeDrawer(true, false);
+        ui.post(() -> showFolderPanel(id));
     }
 
     private View makeFolderMemberView(String folderId, HomeStore.Member m, AppEntry app, ViewGroup parent) {
@@ -1223,6 +1277,7 @@ public class MainActivity extends Activity {
         if (drawerOpen) return;
         drawerOpen = true;
         syncVideoPlayback(); // el video de la Home se pausa y corre el del cajón
+        drawerTitle.setText(pickFolderId != null ? R.string.elige_app_carpeta : R.string.todas_las_apps);
         dismissMenu();
         dismissSheet();
 
@@ -1246,6 +1301,11 @@ public class MainActivity extends Activity {
         if (!drawerOpen) return;
         drawerOpen = false;
         syncVideoPlayback(); // el video del cajón se pausa y vuelve a correr el de la Home
+        if (pickFolderId != null) {                 // se cerró sin elegir: se vuelve a la carpeta
+            final String back = pickFolderId;
+            pickFolderId = null;
+            ui.post(() -> showFolderPanel(back));
+        }
         dismissMenu();
         drawerSheet.animate().cancel();
         drawerScrim.animate().cancel();

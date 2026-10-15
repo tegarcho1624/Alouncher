@@ -162,4 +162,6 @@
     <string name="quitar_de_carpeta">Quitar de la carpeta</string>
     <string name="apps_no_caben">Algunas apps no cupieron en esta página (siguen en el cajón)</string>
     <string name="carpeta_eliminada">Carpeta eliminada</string>
+    <string name="anadir_app">Añadir app</string>
+    <string name="elige_app_carpeta">Elige una app para la carpeta</string>
 </resources>

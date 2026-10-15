@@ -355,6 +355,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:id="@+id/drawer_title"
                     android:fontFamily="serif"
                     android:text="@string/todas_las_apps"
                     android:textColor="@color/ink"
