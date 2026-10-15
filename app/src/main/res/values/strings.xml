@@ -164,4 +164,8 @@
     <string name="carpeta_eliminada">Carpeta eliminada</string>
     <string name="anadir_app">Añadir app</string>
     <string name="elige_app_carpeta">Elige una app para la carpeta</string>
+    <string name="ampliar_carpeta">Ampliar carpeta</string>
+    <string name="eliminar">Eliminar</string>
+    <string name="confirmar_eliminar_carpeta">¿Eliminar carpeta?</string>
+    <string name="confirmar_eliminar_carpeta_detalle">Las apps dentro volverán a la pantalla de inicio.</string>
 </resources>

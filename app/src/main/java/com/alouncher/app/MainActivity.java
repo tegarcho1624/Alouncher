@@ -772,12 +772,49 @@ public class MainActivity extends Activity {
         if (started) v.setAlpha(0.35f);
     }
 
-    /** Menú de la carpeta cerrada en la Home. */
+    /**
+     * Menú de la carpeta cerrada en la Home (mismo estilo que los menús de las apps).
+     * "Ampliar carpeta" y "Cambiar ícono" ya tienen su lugar, pero se activan en fases siguientes.
+     */
     private void showFolderMenu(View anchor, String folderId) {
         LinearLayout col = newMenuColumn();
         col.addView(menuRow(getString(R.string.cambiar_de_nombre), () -> showFolderRenameSheet(folderId)));
-        col.addView(menuRow(getString(R.string.eliminar_carpeta), () -> deleteFolder(folderId)));
+        col.addView(soonRow(getString(R.string.ampliar_carpeta)));
+        col.addView(soonRow(getString(R.string.cambiar_icono)));
+        col.addView(menuRow(getString(R.string.eliminar_carpeta), () -> confirmDeleteFolder(folderId)));
         popup(anchor, col);
+    }
+
+    /** Opción de menú que todavía no está disponible: atenuada, y al tocarla avisa "Próximamente". */
+    private TextView soonRow(String text) {
+        TextView r = menuRow(text, () -> toast(R.string.proximamente));
+        r.setAlpha(0.5f);
+        return r;
+    }
+
+    /** Confirmación antes de eliminar: nada cambia hasta que se toca "Eliminar". */
+    private void confirmDeleteFolder(String folderId) {
+        if (homeStore.folder(folderId) == null) return;
+        dismissSheet();
+        BottomSheet s = new BottomSheet(this, getString(R.string.confirmar_eliminar_carpeta),
+                getString(R.string.confirmar_eliminar_carpeta_detalle));
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        TextView delete = BottomSheet.button(this, getString(R.string.eliminar), false);
+        delete.setTextColor(getColor(R.color.danger));
+        TextView cancel = BottomSheet.button(this, getString(R.string.cancelar), true);
+        delete.setOnClickListener(v -> {
+            s.dismiss();
+            deleteFolder(folderId); // las apps vuelven a la Home y todo se guarda
+        });
+        cancel.setOnClickListener(v -> s.dismiss());
+        buttons.addView(delete, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.4f);
+        cp.leftMargin = dp(10);
+        buttons.addView(cancel, cp);
+        s.footer().addView(buttons);
+        sheet = s;
+        s.show();
     }
 
     /** Elimina la carpeta y devuelve sus apps a la Home (en lugares libres cercanos). */
